@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard Keuangan Elva</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f3; color: #1a1a1a; min-height: 100vh; }
+
+  .header { background: #fff; border-bottom: 1px solid #e5e5e0; padding: 20px 32px; display: flex; align-items: center; justify-content: space-between; }
+  .header h1 { font-size: 20px; font-weight: 600; color: #1a1a1a; }
+  .header .month-label { font-size: 13px; color: #888; background: #f5f5f3; padding: 6px 14px; border-radius: 20px; border: 1px solid #e5e5e0; }
+
+  .container { max-width: 960px; margin: 0 auto; padding: 28px 24px; }
+
+  /* Metric Cards */
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 28px; }
+  .metric-card { background: #fff; border: 1px solid #e5e5e0; border-radius: 12px; padding: 18px 20px; }
+  .metric-card .label { font-size: 12px; color: #888; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .metric-card .value { font-size: 22px; font-weight: 600; }
+  .metric-card .sub { font-size: 12px; color: #888; margin-top: 4px; }
+  .metric-card.danger .value { color: #c0392b; }
+  .metric-card.warning .value { color: #d35400; }
+  .metric-card.success .value { color: #27ae60; }
+  .metric-card.info .value { color: #2980b9; }
+
+  /* Section */
+  .section { background: #fff; border: 1px solid #e5e5e0; border-radius: 12px; padding: 24px; margin-bottom: 20px; }
+  .section-title { font-size: 15px; font-weight: 600; color: #1a1a1a; margin-bottom: 18px; display: flex; align-items: center; gap: 8px; }
+  .section-title .badge { font-size: 11px; font-weight: 500; background: #f5f5f3; border: 1px solid #e5e5e0; border-radius: 20px; padding: 2px 10px; color: #555; }
+
+  /* Debt Table */
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  thead th { text-align: left; font-size: 11px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 0.4px; padding: 0 12px 10px 0; border-bottom: 1px solid #e5e5e0; }
+  tbody td { padding: 12px 12px 12px 0; border-bottom: 1px solid #f0f0ec; vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: none; }
+
+  .card-name { font-weight: 500; display: flex; align-items: center; gap: 8px; }
+  .card-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+  input[type="number"] { border: 1px solid #e5e5e0; border-radius: 6px; padding: 6px 10px; font-size: 13px; width: 130px; color: #1a1a1a; background: #fafafa; outline: none; transition: border 0.15s; font-family: inherit; }
+  input[type="number"]:focus { border-color: #999; background: #fff; }
+
+  .status-badge { font-size: 11px; font-weight: 500; padding: 4px 10px; border-radius: 20px; display: inline-block; }
+  .status-paid { background: #e8f5e9; color: #2e7d32; }
+  .status-pending { background: #fff3e0; color: #e65100; }
+  .status-overdue { background: #ffebee; color: #c62828; }
+
+  .interest-burn { font-size: 12px; color: #c0392b; font-weight: 500; }
+
+  /* Phase tracker */
+  .phases { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .phase-card { border: 1.5px solid #e5e5e0; border-radius: 10px; padding: 16px; position: relative; }
+  .phase-card.active { border-color: #2980b9; background: #f0f7ff; }
+  .phase-card.done { border-color: #27ae60; background: #f0fff4; }
+  .phase-num { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #888; margin-bottom: 6px; }
+  .phase-card.active .phase-num { color: #2980b9; }
+  .phase-card.done .phase-num { color: #27ae60; }
+  .phase-title { font-size: 15px; font-weight: 600; color: #1a1a1a; margin-bottom: 4px; }
+  .phase-desc { font-size: 12px; color: #888; line-height: 1.5; }
+  .phase-amount { font-size: 18px; font-weight: 600; color: #c0392b; margin-top: 10px; }
+  .phase-card.done .phase-amount { color: #27ae60; }
+  .phase-tag { position: absolute; top: 14px; right: 14px; font-size: 10px; font-weight: 600; padding: 3px 8px; border-radius: 20px; }
+  .tag-now { background: #e3f2fd; color: #1565c0; }
+  .tag-next { background: #f5f5f3; color: #888; }
+  .tag-done { background: #e8f5e9; color: #2e7d32; }
+
+  /* Progress bar */
+  .progress-wrap { margin-top: 10px; }
+  .progress-track { height: 6px; background: #f0f0ec; border-radius: 10px; overflow: hidden; }
+  .progress-fill { height: 100%; border-radius: 10px; transition: width 0.3s; }
+  .progress-label { font-size: 11px; color: #888; margin-top: 4px; display: flex; justify-content: space-between; }
+
+  /* Bill checklist */
+  .bill-list { display: flex; flex-direction: column; gap: 0; }
+  .bill-item { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid #f0f0ec; }
+  .bill-item:last-child { border-bottom: none; }
+  .bill-check { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid #ccc; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.15s; }
+  .bill-check.checked { background: #27ae60; border-color: #27ae60; }
+  .bill-check.checked::after { content: '✓'; color: #fff; font-size: 11px; font-weight: 700; }
+  .bill-name { flex: 1; font-size: 14px; font-weight: 500; }
+  .bill-name.checked-text { text-decoration: line-through; color: #aaa; }
+  .bill-amount { font-size: 14px; color: #555; font-weight: 500; }
+  .bill-due { font-size: 12px; color: #888; background: #f5f5f3; border-radius: 6px; padding: 3px 8px; margin-left: 6px; }
+  .bill-due.soon { background: #fff3e0; color: #e65100; }
+  .bill-due.overdue { background: #ffebee; color: #c62828; }
+
+  /* Calculator */
+  .calc-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+  .slider-group { margin-bottom: 18px; }
+  .slider-group label { font-size: 13px; color: #555; display: flex; justify-content: space-between; margin-bottom: 8px; }
+  .slider-group label span { font-weight: 600; color: #1a1a1a; }
+  input[type="range"] { width: 100%; accent-color: #2980b9; }
+  .calc-results { background: #f5f5f3; border-radius: 10px; padding: 18px; }
+  .calc-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #eee; font-size: 14px; }
+  .calc-row:last-child { border-bottom: none; font-weight: 600; font-size: 15px; }
+  .calc-row .label { color: #555; }
+  .calc-row .val { font-weight: 500; }
+  .calc-row.highlight .val { color: #27ae60; font-weight: 700; }
+  .calc-row.bad .val { color: #c0392b; }
+
+  /* Chart */
+  .chart-wrap { position: relative; width: 100%; height: 220px; }
+
+  /* Footer */
+  .footer { text-align: center; font-size: 12px; color: #bbb; padding: 24px; }
+
+  @media (max-width: 700px) {
+    .metrics { grid-template-columns: repeat(2, 1fr); }
+    .phases { grid-template-columns: 1fr; }
+    .calc-wrap { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>💳 Dashboard Keuangan Elva</h1>
+  <span class="month-label" id="currentMonth"></span>
+</div>
+
+<div class="container">
+
+  <!-- Metric Summary -->
+  <div class="metrics">
+    <div class="metric-card danger">
+      <div class="label">Total Utang</div>
+      <div class="value" id="metricTotalDebt">Rp 0</div>
+      <div class="sub">semua kartu + pinjaman</div>
+    </div>
+    <div class="metric-card warning">
+      <div class="label">Cicilan / Bulan</div>
+      <div class="value" id="metricMonthly">Rp 0</div>
+      <div class="sub">minimum payment total</div>
+    </div>
+    <div class="metric-card danger">
+      <div class="label">Bunga Terbakar</div>
+      <div class="value" id="metricInterest">Rp 0</div>
+      <div class="sub">per bulan, cuma bayar waktu</div>
+    </div>
+    <div class="metric-card success">
+      <div class="label">Tabungan / Aset</div>
+      <div class="value">Rp 500jt</div>
+      <div class="sub">deposito + saham</div>
+    </div>
+  </div>
+
+  <!-- Debt Table -->
+  <div class="section">
+    <div class="section-title">
+      Tabel Utang
+      <span class="badge">edit langsung ya</span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Kartu / Pinjaman</th>
+          <th>Saldo (Rp)</th>
+          <th>Cicilan Min (Rp)</th>
+          <th>Bunga / bln</th>
+          <th>Bunga Terbakar</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="debtTableBody"></tbody>
+    </table>
+    <div style="margin-top:16px; text-align:right;">
+      <button onclick="addDebt()" style="font-size:13px; padding:7px 16px; border:1px solid #e5e5e0; background:#fafafa; border-radius:8px; cursor:pointer; color:#555; font-family:inherit;">+ Tambah Utang</button>
+    </div>
+  </div>
+
+  <!-- Payoff Strategy -->
+  <div class="section">
+    <div class="section-title">Strategi Lunas (3 Phase)</div>
+    <div class="phases">
+      <div class="phase-card active" id="phase1card">
+        <div class="phase-num">Phase 1</div>
+        <span class="phase-tag tag-now">Sekarang</span>
+        <div class="phase-title">Bunuh UOB</div>
+        <div class="phase-desc">Paling kecil → cepat selesai → langsung lega</div>
+        <div class="phase-amount">~Rp 20jt</div>
+        <div class="progress-wrap">
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:#888;margin-bottom:4px;">
+            <span>Progress</span>
+            <span id="p1pct">0%</span>
+          </div>
+          <div class="progress-track">
+            <div class="progress-fill" id="p1bar" style="background:#2980b9; width:0%"></div>
+          </div>
+          <div style="margin-top:8px;">
+            <label style="font-size:12px;color:#888;">Sudah dibayar: Rp</label>
+            <input type="number" id="p1paid" placeholder="0" oninput="updatePhase()" style="width:110px;margin-left:6px;font-size:12px;padding:4px 8px;">
+          </div>
+        </div>
+      </div>
+      <div class="phase-card" id="phase2card">
+        <div class="phase-num">Phase 2</div>
+        <span class="phase-tag tag-next">Selanjutnya</span>
+        <div class="phase-title">Tumbangkan BCA</div>
+        <div class="phase-desc">Minimum paling besar → lega cashflow paling kerasa</div>
+        <div class="phase-amount">~Rp 43jt</div>
+        <div class="progress-wrap">
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:#888;margin-bottom:4px;">
+            <span>Progress</span>
+            <span id="p2pct">0%</span>
+          </div>
+          <div class="progress-track">
+            <div class="progress-fill" id="p2bar" style="background:#888; width:0%"></div>
+          </div>
+          <div style="margin-top:8px;">
+            <label style="font-size:12px;color:#888;">Sudah dibayar: Rp</label>
+            <input type="number" id="p2paid" placeholder="0" oninput="updatePhase()" style="width:110px;margin-left:6px;font-size:12px;padding:4px 8px;">
+          </div>
+        </div>
+      </div>
+      <div class="phase-card" id="phase3card">
+        <div class="phase-num">Phase 3</div>
+        <span class="phase-tag tag-next">Terakhir</span>
+        <div class="phase-title">Sikat CIMB</div>
+        <div class="phase-desc">Terbesar, tapi bisa tunggu karena minimum ringan</div>
+        <div class="phase-amount">~Rp 88jt</div>
+        <div class="progress-wrap">
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:#888;margin-bottom:4px;">
+            <span>Progress</span>
+            <span id="p3pct">0%</span>
+          </div>
+          <div class="progress-track">
+            <div class="progress-fill" id="p3bar" style="background:#888; width:0%"></div>
+          </div>
+          <div style="margin-top:8px;">
+            <label style="font-size:12px;color:#888;">Sudah dibayar: Rp</label>
+            <input type="number" id="p3paid" placeholder="0" oninput="updatePhase()" style="width:110px;margin-left:6px;font-size:12px;padding:4px 8px;">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bill Checklist + Chart side by side -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px;">
+
+    <!-- Bill Checklist -->
+    <div class="section" style="margin-bottom:0;">
+      <div class="section-title">
+        Ceklis Bayar Bulan Ini
+        <span class="badge" id="billProgress">0/0 selesai</span>
+      </div>
+      <div class="bill-list" id="billList"></div>
+      <div style="margin-top:14px;">
+        <button onclick="addBill()" style="font-size:12px;padding:6px 14px;border:1px solid #e5e5e0;background:#fafafa;border-radius:8px;cursor:pointer;color:#555;font-family:inherit;">+ Tagihan lain</button>
+        <button onclick="resetBills()" style="font-size:12px;padding:6px 14px;border:1px solid #e5e5e0;background:#fafafa;border-radius:8px;cursor:pointer;color:#555;font-family:inherit;margin-left:8px;">Reset bulan baru</button>
+      </div>
+    </div>
+
+    <!-- Interest Chart -->
+    <div class="section" style="margin-bottom:0;">
+      <div class="section-title">Bunga Terbakar per Kartu</div>
+      <div class="chart-wrap">
+        <canvas id="interestChart" role="img" aria-label="Bar chart showing monthly interest burned per credit card">Monthly interest burned per card.</canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Payoff Calculator -->
+  <div class="section">
+    <div class="section-title">Kalkulator Cicilan Extra</div>
+    <div class="calc-wrap">
+      <div>
+        <div class="slider-group">
+          <label>Total Utang Aktif (Rp juta) <span id="totalDebtSliderVal">151</span>jt</label>
+          <input type="range" id="totalDebtSlider" min="10" max="300" step="1" value="151" oninput="updateCalc()">
+        </div>
+        <div class="slider-group">
+          <label>Cicilan Bulanan Normal (Rp juta) <span id="minPaySliderVal">31</span>jt</label>
+          <input type="range" id="minPaySlider" min="1" max="60" step="0.5" value="31" oninput="updateCalc()">
+        </div>
+        <div class="slider-group">
+          <label>Extra yang bisa dibayar (Rp juta) <span id="extraPaySliderVal">0</span>jt</label>
+          <input type="range" id="extraPaySlider" min="0" max="30" step="0.5" value="0" oninput="updateCalc()">
+        </div>
+        <div class="slider-group">
+          <label>Bunga efektif per bulan (%) <span id="rateSliderVal">2</span>%</label>
+          <input type="range" id="rateSlider" min="0.5" max="3.5" step="0.1" value="2" oninput="updateCalc()">
+        </div>
+      </div>
+      <div>
+        <div class="calc-results">
+          <div class="calc-row">
+            <span class="label">Cicilan bulanan sekarang</span>
+            <span class="val" id="calcMinPay">Rp 31jt</span>
+          </div>
+          <div class="calc-row">
+            <span class="label">Extra yang ditambah</span>
+            <span class="val" id="calcExtra">Rp 0</span>
+          </div>
+          <div class="calc-row bad">
+            <span class="label">Bunga terbakar / bln</span>
+            <span class="val" id="calcInterest">Rp 0</span>
+          </div>
+          <div class="calc-row">
+            <span class="label">Estimasi lunas dalam</span>
+            <span class="val" id="calcMonths">— bulan</span>
+          </div>
+          <div class="calc-row highlight">
+            <span class="label">Hemat bunga total</span>
+            <span class="val" id="calcSaved">Rp 0</span>
+          </div>
+        </div>
+        <div style="margin-top:12px;font-size:12px;color:#888;line-height:1.6;background:#fff8f0;border-radius:8px;padding:12px;border:1px solid #fde8d0;">
+          ⚡ Kalau tambahin cicilan extra tiap bulan, bunga yang kebakar langsung turun dan utang lunas jauh lebih cepat.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">Dashboard Keuangan Elva · Diperbarui otomatis saat kamu ubah angkanya · Data tersimpan di browser ini</div>
+
+</div>
+
+<script>
+// ── DATA ──────────────────────────────────────────────────────────────────
+const STORAGE_KEY = 'elva_finance_v3';
+
+const defaultDebts = [
+  { id: 1, name: 'CIMB Credit Card', color: '#e74c3c', outstanding: 88000000, minPay: 5000000, rate: 2.0, paid: false },
+  { id: 2, name: 'BCA Credit Card',  color: '#e67e22', outstanding: 43000000, minPay: 8000000, rate: 2.0, paid: false },
+  { id: 3, name: 'UOB Credit Card',  color: '#f39c12', outstanding: 20000000, minPay: 5500000, rate: 2.0, paid: false },
+  { id: 4, name: 'Tokopedia Card (BRI)', color: '#9b59b6', outstanding: 8000000, minPay: 2500000, rate: 2.0, paid: false },
+  { id: 5, name: 'SPayLater',        color: '#3498db', outstanding: 5000000,  minPay: 2000000, rate: 0, paid: false },
+];
+
+const defaultBills = [
+  { id: 1, name: 'CIMB Credit Card', amount: 5000000, due: 5, checked: false },
+  { id: 2, name: 'BCA Credit Card',  amount: 8000000, due: 10, checked: false },
+  { id: 3, name: 'UOB Credit Card',  amount: 5500000, due: 15, checked: false },
+  { id: 4, name: 'Tokopedia Card',   amount: 2500000, due: 20, checked: false },
+  { id: 5, name: 'SPayLater',        amount: 2000000, due: 25, checked: false },
+];
+
+function loadData() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) return JSON.parse(saved);
+  } catch(e) {}
+  return { debts: defaultDebts, bills: defaultBills };
+}
+
+function saveData() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch(e) {}
+}
+
+let state = loadData();
+
+// ── UTILS ────────────────────────────────────────────────────────────────
+function fmt(n) {
+  if (n >= 1000000) return 'Rp ' + Math.round(n/1000000) + 'jt';
+  if (n >= 1000) return 'Rp ' + Math.round(n/1000) + 'rb';
+  return 'Rp ' + Math.round(n);
+}
+function fmtFull(n) {
+  return 'Rp ' + Math.round(n).toLocaleString('id-ID');
+}
+function today() { return new Date().getDate(); }
+
+// ── MONTH LABEL ──────────────────────────────────────────────────────────
+const months = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+const now = new Date();
+document.getElementById('currentMonth').textContent = months[now.getMonth()] + ' ' + now.getFullYear();
+
+// ── DEBT TABLE ───────────────────────────────────────────────────────────
+function renderDebtTable() {
+  const tbody = document.getElementById('debtTableBody');
+  tbody.innerHTML = '';
+  state.debts.forEach((d, i) => {
+    const interest = d.outstanding * (d.rate / 100);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><div class="card-name"><div class="card-dot" style="background:${d.color}"></div><input type="text" value="${d.name}" onchange="state.debts[${i}].name=this.value;saveData();updateMetrics();" style="border:none;background:transparent;font-size:14px;font-weight:500;width:160px;outline:none;color:#1a1a1a;font-family:inherit;"></div></td>
+      <td><input type="number" value="${d.outstanding}" step="100000" onchange="state.debts[${i}].outstanding=+this.value;saveData();updateAll();" style="width:130px;"></td>
+      <td><input type="number" value="${d.minPay}" step="100000" onchange="state.debts[${i}].minPay=+this.value;saveData();updateAll();" style="width:130px;"></td>
+      <td><input type="number" value="${d.rate}" step="0.1" onchange="state.debts[${i}].rate=+this.value;saveData();updateAll();" style="width:70px;">%</td>
+      <td><span class="interest-burn">${interest > 0 ? fmt(interest) : '—'}</span></td>
+      <td>
+        <select onchange="state.debts[${i}].paid=this.value==='paid';saveData();" style="border:1px solid #e5e5e0;border-radius:6px;padding:5px 8px;font-size:12px;color:#555;background:#fafafa;outline:none;font-family:inherit;">
+          <option value="active" ${!d.paid?'selected':''}>Aktif</option>
+          <option value="paid" ${d.paid?'selected':''}>Lunas ✓</option>
+        </select>
+        <button onclick="removeDebt(${i})" style="border:none;background:none;cursor:pointer;color:#ccc;font-size:14px;margin-left:4px;" title="Hapus">✕</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function addDebt() {
+  state.debts.push({ id: Date.now(), name: 'Utang Baru', color: '#95a5a6', outstanding: 0, minPay: 0, rate: 2.0, paid: false });
+  saveData(); updateAll();
+}
+
+function removeDebt(i) {
+  state.debts.splice(i, 1);
+  saveData(); updateAll();
+}
+
+// ── METRICS ──────────────────────────────────────────────────────────────
+function updateMetrics() {
+  const activeDebts = state.debts.filter(d => !d.paid);
+  const totalDebt = activeDebts.reduce((s,d) => s + d.outstanding, 0);
+  const totalMin  = activeDebts.reduce((s,d) => s + d.minPay, 0);
+  const totalInt  = activeDebts.reduce((s,d) => s + d.outstanding * (d.rate/100), 0);
+  document.getElementById('metricTotalDebt').textContent = fmt(totalDebt);
+  document.getElementById('metricMonthly').textContent   = fmt(totalMin);
+  document.getElementById('metricInterest').textContent  = fmt(totalInt);
+}
+
+// ── BILL CHECKLIST ───────────────────────────────────────────────────────
+function renderBills() {
+  const list = document.getElementById('billList');
+  list.innerHTML = '';
+  const todayDate = today();
+  state.bills.forEach((b, i) => {
+    const daysLeft = b.due - todayDate;
+    let dueClass = '', dueText = `tgl ${b.due}`;
+    if (daysLeft < 0) { dueClass = 'overdue'; dueText = `tgl ${b.due} (telat!)`; }
+    else if (daysLeft <= 3) { dueClass = 'soon'; dueText = `tgl ${b.due} (${daysLeft}hr lagi!)`; }
+
+    const div = document.createElement('div');
+    div.className = 'bill-item';
+    div.innerHTML = `
+      <div class="bill-check ${b.checked?'checked':''}" onclick="toggleBill(${i})"></div>
+      <div class="bill-name ${b.checked?'checked-text':''}">${b.name}</div>
+      <input type="number" value="${b.amount}" step="100000" onchange="state.bills[${i}].amount=+this.value;saveData();renderBills();" style="width:110px;font-size:13px;">
+      <span class="bill-due ${dueClass}">${dueText}</span>
+      <button onclick="removeBill(${i})" style="border:none;background:none;cursor:pointer;color:#ddd;font-size:13px;" title="Hapus">✕</button>
+    `;
+    list.appendChild(div);
+  });
+  const done = state.bills.filter(b=>b.checked).length;
+  document.getElementById('billProgress').textContent = `${done}/${state.bills.length} selesai`;
+}
+
+function toggleBill(i) { state.bills[i].checked = !state.bills[i].checked; saveData(); renderBills(); }
+
+function addBill() {
+  const name = prompt('Nama tagihan?');
+  if (!name) return;
+  const due = parseInt(prompt('Tanggal jatuh tempo? (angka 1-31)') || '1');
+  state.bills.push({ id: Date.now(), name, amount: 0, due: due||1, checked: false });
+  saveData(); renderBills();
+}
+
+function removeBill(i) { state.bills.splice(i,1); saveData(); renderBills(); }
+
+function resetBills() {
+  if (confirm('Reset semua ceklis untuk bulan baru?')) {
+    state.bills.forEach(b => b.checked = false);
+    saveData(); renderBills();
+  }
+}
+
+// ── PHASE TRACKER ────────────────────────────────────────────────────────
+function updatePhase() {
+  const phases = [
+    { id:1, target: 20000000, barId:'p1bar', pctId:'p1pct', paidId:'p1paid', cardId:'phase1card' },
+    { id:2, target: 43000000, barId:'p2bar', pctId:'p2pct', paidId:'p2paid', cardId:'phase2card' },
+    { id:3, target: 88000000, barId:'p3bar', pctId:'p3pct', paidId:'p3paid', cardId:'phase3card' },
+  ];
+  phases.forEach(p => {
+    const input = document.getElementById(p.paidId);
+    const paid = parseFloat(input.value) * 1000000 || 0;
+    const pct = Math.min(100, Math.round(paid / p.target * 100));
+    document.getElementById(p.pctId).textContent = pct + '%';
+    const bar = document.getElementById(p.barId);
+    bar.style.width = pct + '%';
+    const card = document.getElementById(p.cardId);
+    if (pct >= 100) {
+      bar.style.background = '#27ae60';
+      card.className = 'phase-card done';
+    } else if (pct > 0) {
+      bar.style.background = '#2980b9';
+      card.className = 'phase-card active';
+    }
+  });
+}
+
+// ── INTEREST CHART ───────────────────────────────────────────────────────
+let interestChartObj = null;
+
+function updateChart() {
+  const activeDebts = state.debts.filter(d => !d.paid && d.rate > 0);
+  const labels = activeDebts.map(d => d.name.replace(' Credit Card','').replace(' Card',''));
+  const data   = activeDebts.map(d => Math.round(d.outstanding * d.rate / 100 / 1000));
+  const colors = activeDebts.map(d => d.color);
+
+  if (interestChartObj) interestChartObj.destroy();
+  const ctx = document.getElementById('interestChart').getContext('2d');
+  interestChartObj = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Bunga/bulan (Rp ribu)',
+        data,
+        backgroundColor: colors,
+        borderRadius: 6,
+        borderSkipped: false,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { grid: { color: '#f0f0ec' }, ticks: { callback: v => 'Rp ' + v + 'rb', font: { size: 11 } } },
+        x: { grid: { display: false }, ticks: { font: { size: 11 } } }
+      }
+    }
+  });
+}
+
+// ── CALCULATOR ───────────────────────────────────────────────────────────
+function updateCalc() {
+  const debt    = parseFloat(document.getElementById('totalDebtSlider').value) * 1000000;
+  const minPay  = parseFloat(document.getElementById('minPaySlider').value) * 1000000;
+  const extra   = parseFloat(document.getElementById('extraPaySlider').value) * 1000000;
+  const rate    = parseFloat(document.getElementById('rateSlider').value) / 100;
+
+  document.getElementById('totalDebtSliderVal').textContent = Math.round(debt/1000000);
+  document.getElementById('minPaySliderVal').textContent    = parseFloat(document.getElementById('minPaySlider').value);
+  document.getElementById('extraPaySliderVal').textContent  = parseFloat(document.getElementById('extraPaySlider').value);
+  document.getElementById('rateSliderVal').textContent      = parseFloat(document.getElementById('rateSlider').value);
+
+  const totalPay = minPay + extra;
+  const interest = Math.round(debt * rate);
+
+  // Months to payoff (amortization)
+  let months = 0, rem = debt;
+  if (totalPay > interest) {
+    while (rem > 0 && months < 600) {
+      rem = rem * (1 + rate) - totalPay;
+      months++;
+    }
+  }
+
+  // Interest saved vs paying minimum only
+  let remMin = debt, mMin = 0, intMin = 0;
+  if (minPay > rem * rate) {
+    while (remMin > 0 && mMin < 600) {
+      intMin += remMin * rate;
+      remMin = remMin * (1 + rate) - minPay;
+      mMin++;
+    }
+  }
+  let remExtra = debt, mExtra = 0, intExtra = 0;
+  if (totalPay > rem * rate) {
+    while (remExtra > 0 && mExtra < 600) {
+      intExtra += remExtra * rate;
+      remExtra = remExtra * (1 + rate) - totalPay;
+      mExtra++;
+    }
+  }
+  const saved = Math.max(0, intMin - intExtra);
+
+  document.getElementById('calcMinPay').textContent  = fmt(minPay);
+  document.getElementById('calcExtra').textContent   = fmt(extra);
+  document.getElementById('calcInterest').textContent = fmt(interest) + '/bln';
+  document.getElementById('calcMonths').textContent  = months > 0 && months < 600 ? months + ' bulan (~' + Math.round(months/12*10)/10 + ' thn)' : '— (tambah extra ya!)';
+  document.getElementById('calcSaved').textContent   = saved > 0 ? fmt(saved) : 'Rp 0';
+}
+
+// ── INIT & UPDATE ALL ────────────────────────────────────────────────────
+function updateAll() {
+  renderDebtTable();
+  updateMetrics();
+  updateChart();
+  renderBills();
+  updateCalc();
+}
+
+updateAll();
+</script>
+</body>
+</html>

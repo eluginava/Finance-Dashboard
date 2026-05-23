@@ -79,7 +79,7 @@
   .bill-item:last-child { border-bottom: none; }
   .bill-check { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid #ccc; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.15s; }
   .bill-check.checked { background: #27ae60; border-color: #27ae60; }
-  .bill-check.checked::after { content: '✓'; color: #fff; font-size: 11px; font-weight: 700; }
+  .bill-check.checked::after { content: 'â'; color: #fff; font-size: 11px; font-weight: 700; }
   .bill-name { flex: 1; font-size: 14px; font-weight: 500; }
   .bill-name.checked-text { text-decoration: line-through; color: #aaa; }
   .bill-amount { font-size: 14px; color: #555; font-weight: 500; }
@@ -117,7 +117,7 @@
 <body>
 
 <div class="header">
-  <h1>💳 Dashboard Keuangan Elva</h1>
+  <h1>ð³ Dashboard Keuangan Elva</h1>
   <span class="month-label" id="currentMonth"></span>
 </div>
 
@@ -179,8 +179,8 @@
         <div class="phase-num">Phase 1</div>
         <span class="phase-tag tag-now">Sekarang</span>
         <div class="phase-title">Bunuh UOB</div>
-        <div class="phase-desc">Paling kecil → cepat selesai → langsung lega</div>
-        <div class="phase-amount">~Rp 20jt</div>
+        <div class="phase-desc">Paling kecil â cepat selesai â langsung lega</div>
+        <div class="phase-amount">Rp 10,454,072</div>
         <div class="progress-wrap">
           <div style="display:flex;justify-content:space-between;font-size:11px;color:#888;margin-bottom:4px;">
             <span>Progress</span>
@@ -199,8 +199,8 @@
         <div class="phase-num">Phase 2</div>
         <span class="phase-tag tag-next">Selanjutnya</span>
         <div class="phase-title">Tumbangkan BCA</div>
-        <div class="phase-desc">Minimum paling besar → lega cashflow paling kerasa</div>
-        <div class="phase-amount">~Rp 43jt</div>
+        <div class="phase-desc">Minimum paling besar â lega cashflow paling kerasa</div>
+        <div class="phase-amount">Rp 25,890,281</div>
         <div class="progress-wrap">
           <div style="display:flex;justify-content:space-between;font-size:11px;color:#888;margin-bottom:4px;">
             <span>Progress</span>
@@ -220,7 +220,7 @@
         <span class="phase-tag tag-next">Terakhir</span>
         <div class="phase-title">Sikat CIMB</div>
         <div class="phase-desc">Terbesar, tapi bisa tunggu karena minimum ringan</div>
-        <div class="phase-amount">~Rp 88jt</div>
+        <div class="phase-amount">Rp 57,132,342</div>
         <div class="progress-wrap">
           <div style="display:flex;justify-content:space-between;font-size:11px;color:#888;margin-bottom:4px;">
             <span>Progress</span>
@@ -269,12 +269,12 @@
     <div class="calc-wrap">
       <div>
         <div class="slider-group">
-          <label>Total Utang Aktif (Rp juta) <span id="totalDebtSliderVal">151</span>jt</label>
-          <input type="range" id="totalDebtSlider" min="10" max="300" step="1" value="151" oninput="updateCalc()">
+          <label>Total Utang Aktif (Rp juta) <span id="totalDebtSliderVal">101</span>jt</label>
+          <input type="range" id="totalDebtSlider" min="10" max="300" step="1" value="101" oninput="updateCalc()">
         </div>
         <div class="slider-group">
-          <label>Cicilan Bulanan Normal (Rp juta) <span id="minPaySliderVal">31</span>jt</label>
-          <input type="range" id="minPaySlider" min="1" max="60" step="0.5" value="31" oninput="updateCalc()">
+          <label>Cicilan Bulanan Normal (Rp juta) <span id="minPaySliderVal">39.6</span>jt</label>
+          <input type="range" id="minPaySlider" min="1" max="60" step="0.5" value="39.6" oninput="updateCalc()">
         </div>
         <div class="slider-group">
           <label>Extra yang bisa dibayar (Rp juta) <span id="extraPaySliderVal">0</span>jt</label>
@@ -301,7 +301,7 @@
           </div>
           <div class="calc-row">
             <span class="label">Estimasi lunas dalam</span>
-            <span class="val" id="calcMonths">— bulan</span>
+            <span class="val" id="calcMonths">â bulan</span>
           </div>
           <div class="calc-row highlight">
             <span class="label">Hemat bunga total</span>
@@ -309,34 +309,44 @@
           </div>
         </div>
         <div style="margin-top:12px;font-size:12px;color:#888;line-height:1.6;background:#fff8f0;border-radius:8px;padding:12px;border:1px solid #fde8d0;">
-          ⚡ Kalau tambahin cicilan extra tiap bulan, bunga yang kebakar langsung turun dan utang lunas jauh lebih cepat.
+          â¡ Kalau tambahin cicilan extra tiap bulan, bunga yang kebakar langsung turun dan utang lunas jauh lebih cepat.
         </div>
       </div>
     </div>
   </div>
 
-  <div class="footer">Dashboard Keuangan Elva · Diperbarui otomatis saat kamu ubah angkanya · Data tersimpan di browser ini</div>
+  <div class="footer">Dashboard Keuangan Elva Â· Diperbarui otomatis saat kamu ubah angkanya Â· Data tersimpan di browser ini</div>
 
 </div>
 
 <script>
-// ── DATA ──────────────────────────────────────────────────────────────────
+// ââ DATA ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 const STORAGE_KEY = 'elva_finance_v3';
 
 const defaultDebts = [
-  { id: 1, name: 'CIMB Credit Card', color: '#e74c3c', outstanding: 88000000, minPay: 5000000, rate: 2.0, paid: false },
-  { id: 2, name: 'BCA Credit Card',  color: '#e67e22', outstanding: 43000000, minPay: 8000000, rate: 2.0, paid: false },
-  { id: 3, name: 'UOB Credit Card',  color: '#f39c12', outstanding: 20000000, minPay: 5500000, rate: 2.0, paid: false },
-  { id: 4, name: 'Tokopedia Card (BRI)', color: '#9b59b6', outstanding: 8000000, minPay: 2500000, rate: 2.0, paid: false },
-  { id: 5, name: 'SPayLater',        color: '#3498db', outstanding: 5000000,  minPay: 2000000, rate: 0, paid: false },
+  { id: 1, name: 'CIMB Credit Card',     color: '#e74c3c', outstanding: 57132342, minPay: 2856618, rate: 2.0, paid: false },
+  { id: 2, name: 'BCA Credit Card',      color: '#e67e22', outstanding: 25890281, minPay: 9590724, rate: 2.0, paid: false },
+  { id: 3, name: 'UOB Credit Card',      color: '#f39c12', outstanding: 10454072, minPay: 4000000, rate: 2.0, paid: false },
+  { id: 4, name: 'Tokopedia Card (BRI)', color: '#9b59b6', outstanding: 3279736,  minPay: 3279736, rate: 0,   paid: false },
+  { id: 5, name: 'ShopeePaylater',       color: '#ee4d2d', outstanding: 3624946,  minPay: 3624946, rate: 0,   paid: false },
+  { id: 6, name: 'GoPaylater',           color: '#00aed6', outstanding: 1319408,  minPay: 1319408, rate: 0,   paid: false },
+  { id: 7, name: 'KPR Klp Gading',       color: '#27ae60', outstanding: 0,        minPay: 7067419, rate: 0,   paid: false },
+  { id: 8, name: 'KPR Citra',            color: '#16a085', outstanding: 0,        minPay: 3438520, rate: 0,   paid: false },
+  { id: 9, name: 'Pinjaman Bank',        color: '#7f8c8d', outstanding: 0,        minPay: 1563483, rate: 0,   paid: false },
 ];
 
 const defaultBills = [
-  { id: 1, name: 'CIMB Credit Card', amount: 5000000, due: 5, checked: false },
-  { id: 2, name: 'BCA Credit Card',  amount: 8000000, due: 10, checked: false },
-  { id: 3, name: 'UOB Credit Card',  amount: 5500000, due: 15, checked: false },
-  { id: 4, name: 'Tokopedia Card',   amount: 2500000, due: 20, checked: false },
-  { id: 5, name: 'SPayLater',        amount: 2000000, due: 25, checked: false },
+  { id:  1, name: 'ShopeePaylater',          amount: 3624946, due: 1,  checked: true },
+  { id:  2, name: 'GoPaylater',              amount: 1319408, due: 1,  checked: true },
+  { id:  3, name: 'UOB Credit Card',         amount: 4000000, due: 2,  checked: true },
+  { id:  4, name: 'BCA Credit Card',         amount: 9590724, due: 3,  checked: true },
+  { id:  5, name: 'CIMB Credit Card',        amount: 2856618, due: 5,  checked: true },
+  { id:  6, name: 'KPR Klp Gading',          amount: 7067419, due: 8,  checked: true },
+  { id:  7, name: 'KPR Citra',               amount: 3438520, due: 13, checked: true },
+  { id:  8, name: 'Allianz Mama (via BCA)',   amount: 1638000, due: 14, checked: true },
+  { id:  9, name: 'Tokopedia Card (BRI)',     amount: 3279736, due: 20, checked: true },
+  { id: 10, name: 'Pinjaman Bank',           amount: 1563483, due: 23, checked: true },
+  { id: 11, name: 'Allianz Elva (via BCA)',   amount: 1275000, due: 24, checked: true },
 ];
 
 function loadData() {
@@ -353,7 +363,7 @@ function saveData() {
 
 let state = loadData();
 
-// ── UTILS ────────────────────────────────────────────────────────────────
+// ââ UTILS ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function fmt(n) {
   if (n >= 1000000) return 'Rp ' + Math.round(n/1000000) + 'jt';
   if (n >= 1000) return 'Rp ' + Math.round(n/1000) + 'rb';
@@ -364,12 +374,12 @@ function fmtFull(n) {
 }
 function today() { return new Date().getDate(); }
 
-// ── MONTH LABEL ──────────────────────────────────────────────────────────
+// ââ MONTH LABEL ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 const months = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
 const now = new Date();
 document.getElementById('currentMonth').textContent = months[now.getMonth()] + ' ' + now.getFullYear();
 
-// ── DEBT TABLE ───────────────────────────────────────────────────────────
+// ââ DEBT TABLE âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function renderDebtTable() {
   const tbody = document.getElementById('debtTableBody');
   tbody.innerHTML = '';
@@ -381,13 +391,13 @@ function renderDebtTable() {
       <td><input type="number" value="${d.outstanding}" step="100000" onchange="state.debts[${i}].outstanding=+this.value;saveData();updateAll();" style="width:130px;"></td>
       <td><input type="number" value="${d.minPay}" step="100000" onchange="state.debts[${i}].minPay=+this.value;saveData();updateAll();" style="width:130px;"></td>
       <td><input type="number" value="${d.rate}" step="0.1" onchange="state.debts[${i}].rate=+this.value;saveData();updateAll();" style="width:70px;">%</td>
-      <td><span class="interest-burn">${interest > 0 ? fmt(interest) : '—'}</span></td>
+      <td><span class="interest-burn">${interest > 0 ? fmt(interest) : 'â'}</span></td>
       <td>
         <select onchange="state.debts[${i}].paid=this.value==='paid';saveData();" style="border:1px solid #e5e5e0;border-radius:6px;padding:5px 8px;font-size:12px;color:#555;background:#fafafa;outline:none;font-family:inherit;">
           <option value="active" ${!d.paid?'selected':''}>Aktif</option>
-          <option value="paid" ${d.paid?'selected':''}>Lunas ✓</option>
+          <option value="paid" ${d.paid?'selected':''}>Lunas â</option>
         </select>
-        <button onclick="removeDebt(${i})" style="border:none;background:none;cursor:pointer;color:#ccc;font-size:14px;margin-left:4px;" title="Hapus">✕</button>
+        <button onclick="removeDebt(${i})" style="border:none;background:none;cursor:pointer;color:#ccc;font-size:14px;margin-left:4px;" title="Hapus">â</button>
       </td>
     `;
     tbody.appendChild(tr);
@@ -404,7 +414,7 @@ function removeDebt(i) {
   saveData(); updateAll();
 }
 
-// ── METRICS ──────────────────────────────────────────────────────────────
+// ââ METRICS ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function updateMetrics() {
   const activeDebts = state.debts.filter(d => !d.paid);
   const totalDebt = activeDebts.reduce((s,d) => s + d.outstanding, 0);
@@ -415,7 +425,7 @@ function updateMetrics() {
   document.getElementById('metricInterest').textContent  = fmt(totalInt);
 }
 
-// ── BILL CHECKLIST ───────────────────────────────────────────────────────
+// ââ BILL CHECKLIST âââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function renderBills() {
   const list = document.getElementById('billList');
   list.innerHTML = '';
@@ -433,7 +443,7 @@ function renderBills() {
       <div class="bill-name ${b.checked?'checked-text':''}">${b.name}</div>
       <input type="number" value="${b.amount}" step="100000" onchange="state.bills[${i}].amount=+this.value;saveData();renderBills();" style="width:110px;font-size:13px;">
       <span class="bill-due ${dueClass}">${dueText}</span>
-      <button onclick="removeBill(${i})" style="border:none;background:none;cursor:pointer;color:#ddd;font-size:13px;" title="Hapus">✕</button>
+      <button onclick="removeBill(${i})" style="border:none;background:none;cursor:pointer;color:#ddd;font-size:13px;" title="Hapus">â</button>
     `;
     list.appendChild(div);
   });
@@ -460,12 +470,12 @@ function resetBills() {
   }
 }
 
-// ── PHASE TRACKER ────────────────────────────────────────────────────────
+// ââ PHASE TRACKER ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function updatePhase() {
   const phases = [
-    { id:1, target: 20000000, barId:'p1bar', pctId:'p1pct', paidId:'p1paid', cardId:'phase1card' },
-    { id:2, target: 43000000, barId:'p2bar', pctId:'p2pct', paidId:'p2paid', cardId:'phase2card' },
-    { id:3, target: 88000000, barId:'p3bar', pctId:'p3pct', paidId:'p3paid', cardId:'phase3card' },
+    { id:1, target: 10454072, barId:'p1bar', pctId:'p1pct', paidId:'p1paid', cardId:'phase1card' },
+    { id:2, target: 25890281, barId:'p2bar', pctId:'p2pct', paidId:'p2paid', cardId:'phase2card' },
+    { id:3, target: 57132342, barId:'p3bar', pctId:'p3pct', paidId:'p3paid', cardId:'phase3card' },
   ];
   phases.forEach(p => {
     const input = document.getElementById(p.paidId);
@@ -485,7 +495,7 @@ function updatePhase() {
   });
 }
 
-// ── INTEREST CHART ───────────────────────────────────────────────────────
+// ââ INTEREST CHART âââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 let interestChartObj = null;
 
 function updateChart() {
@@ -520,7 +530,7 @@ function updateChart() {
   });
 }
 
-// ── CALCULATOR ───────────────────────────────────────────────────────────
+// ââ CALCULATOR âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function updateCalc() {
   const debt    = parseFloat(document.getElementById('totalDebtSlider').value) * 1000000;
   const minPay  = parseFloat(document.getElementById('minPaySlider').value) * 1000000;
@@ -566,11 +576,11 @@ function updateCalc() {
   document.getElementById('calcMinPay').textContent  = fmt(minPay);
   document.getElementById('calcExtra').textContent   = fmt(extra);
   document.getElementById('calcInterest').textContent = fmt(interest) + '/bln';
-  document.getElementById('calcMonths').textContent  = months > 0 && months < 600 ? months + ' bulan (~' + Math.round(months/12*10)/10 + ' thn)' : '— (tambah extra ya!)';
+  document.getElementById('calcMonths').textContent  = months > 0 && months < 600 ? months + ' bulan (~' + Math.round(months/12*10)/10 + ' thn)' : 'â (tambah extra ya!)';
   document.getElementById('calcSaved').textContent   = saved > 0 ? fmt(saved) : 'Rp 0';
 }
 
-// ── INIT & UPDATE ALL ────────────────────────────────────────────────────
+// ââ INIT & UPDATE ALL ââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function updateAll() {
   renderDebtTable();
   updateMetrics();

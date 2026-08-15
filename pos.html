@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Kasir Elva - POS</title>
+<title>MUGI POS - Aplikasi POS MUGI</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -190,7 +190,7 @@
 <body>
 
 <div class="header">
-  <h1>🏪 Kasir Elva</h1>
+  <h1>🏪 MUGI POS</h1>
   <div class="tabs">
     <button class="tab-btn active" data-page="kasir" onclick="switchPage('kasir')">Kasir</button>
     <button class="tab-btn" data-page="produk" onclick="switchPage('produk')">Produk</button>
@@ -322,6 +322,7 @@
       <div class="section-title">
         Penjualan per Kanal (7 hari)
         <span class="badge">% komisi bisa diubah</span>
+        <button class="add-btn" style="margin-left:auto;font-size:12px;padding:5px 12px;" onclick="exportCSV()">⬇ Export Laporan CSV</button>
       </div>
       <div id="channelBreakdown" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;"></div>
     </div>
@@ -332,7 +333,7 @@
     </div>
   </div>
 
-  <div class="footer">Kasir Elva · Aplikasi POS ala Moka · Data tersimpan di browser ini</div>
+  <div class="footer">MUGI POS · Aplikasi POS MUGI · Data tersimpan di browser ini</div>
 </div>
 
 <!-- ═══ PAYMENT MODAL ═══ -->
@@ -766,7 +767,7 @@ function showReceipt(trx) {
   const timeStr = d.getDate() + '/' + (d.getMonth()+1) + '/' + d.getFullYear() + ' ' +
     String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
   let html = `
-    <div class="r-center r-bold">KASIR ELVA</div>
+    <div class="r-center r-bold">MUGI POS</div>
     <div class="r-center">Struk Pembayaran</div>
     <div class="r-line"></div>
     <div class="r-row"><span>${trx.id}</span><span>${timeStr}</span></div>`;
@@ -1176,7 +1177,7 @@ function exportCSV() {
   const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'laporan-kasir-' + dayKey(new Date()) + '.csv';
+  a.download = 'laporan-mugi-pos-' + dayKey(new Date()) + '.csv';
   a.click();
   URL.revokeObjectURL(a.href);
 }

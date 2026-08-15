@@ -12,6 +12,9 @@
   .header { background: #fff; border-bottom: 1px solid #e5e5e0; padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 50; }
   .header h1 { font-size: 18px; font-weight: 600; }
   .header .date-label { font-size: 13px; color: #888; background: #f5f5f3; padding: 6px 14px; border-radius: 20px; border: 1px solid #e5e5e0; }
+  .cloud-badge { font-size: 12px; font-weight: 500; padding: 6px 12px; border-radius: 20px; border: 1px solid #e5e5e0; background: #f5f5f3; color: #888; cursor: pointer; font-family: inherit; }
+  .cloud-badge.on { background: #e8f5e9; color: #2e7d32; border-color: #c8e6c9; }
+  .cloud-badge.pending { background: #fff3e0; color: #e65100; border-color: #ffe0b2; }
 
   .tabs { display: flex; gap: 6px; }
   .tab-btn { font-size: 13px; font-weight: 500; padding: 8px 18px; border-radius: 8px; border: 1px solid transparent; background: none; cursor: pointer; color: #888; font-family: inherit; transition: all 0.15s; }
@@ -41,7 +44,7 @@
   .product-card { background: #fff; border: 1px solid #e5e5e0; border-radius: 10px; padding: 14px; cursor: pointer; transition: all 0.12s; user-select: none; }
   .product-card:hover { border-color: #999; transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
   .product-card.out { opacity: 0.45; cursor: not-allowed; }
-  .product-emoji { font-size: 28px; margin-bottom: 8px; }
+  .product-thumb { width: 100%; aspect-ratio: 16 / 9; border-radius: 8px; object-fit: cover; margin-bottom: 8px; background: #f5f5f3; display: flex; align-items: center; justify-content: center; font-size: 30px; }
   .product-name { font-size: 13px; font-weight: 600; margin-bottom: 4px; line-height: 1.3; }
   .product-price { font-size: 13px; color: #555; }
   .product-stock { font-size: 11px; color: #888; margin-top: 4px; }
@@ -99,6 +102,9 @@
 
   .modal input[type="number"] { width: 100%; border: 1px solid #e5e5e0; border-radius: 8px; padding: 11px 14px; font-size: 16px; font-weight: 600; background: #fafafa; outline: none; font-family: inherit; }
   .modal input[type="number"]:focus { border-color: #999; background: #fff; }
+  .modal input.txt { width: 100%; border: 1px solid #e5e5e0; border-radius: 8px; padding: 10px 14px; font-size: 13px; background: #fafafa; outline: none; font-family: inherit; margin-bottom: 12px; }
+  .modal input.txt:focus { border-color: #999; background: #fff; }
+  .modal textarea.sql { width: 100%; height: 150px; border: 1px solid #e5e5e0; border-radius: 8px; padding: 10px; font-size: 11px; font-family: monospace; background: #fafafa; outline: none; resize: vertical; }
   .modal label { font-size: 12px; color: #888; display: block; margin-bottom: 6px; }
 
   .change-box { background: #f5f5f3; border-radius: 10px; padding: 14px; margin-top: 14px; display: flex; justify-content: space-between; align-items: center; }
@@ -191,7 +197,10 @@
     <button class="tab-btn" data-page="riwayat" onclick="switchPage('riwayat')">Riwayat</button>
     <button class="tab-btn" data-page="laporan" onclick="switchPage('laporan')">Laporan</button>
   </div>
-  <span class="date-label" id="currentDate"></span>
+  <div style="display:flex;align-items:center;gap:8px;">
+    <button class="cloud-badge" id="cloudBadge" onclick="openCloud()">☁️ off</button>
+    <span class="date-label" id="currentDate"></span>
+  </div>
 </div>
 
 <div class="container">
@@ -240,6 +249,7 @@
         <table>
           <thead>
             <tr>
+              <th>Foto</th>
               <th>Produk</th>
               <th>Kategori</th>
               <th>Harga (Rp)</th>
@@ -262,6 +272,7 @@
       <div class="section-title">
         Riwayat Transaksi
         <span class="badge" id="trxCount">0 transaksi</span>
+        <button class="add-btn" style="margin-left:auto;font-size:12px;padding:5px 12px;" onclick="exportCSV()">⬇ Export CSV</button>
       </div>
       <div id="trxList"></div>
     </div>
@@ -367,6 +378,59 @@
   </div>
 </div>
 
+<!-- ═══ CLOUD SETTINGS MODAL ═══ -->
+<div class="modal-overlay" id="cloudModal">
+  <div class="modal">
+    <h2>☁️ Sinkronisasi Cloud (Supabase)</h2>
+    <p style="font-size:13px;color:#555;line-height:1.6;margin-bottom:14px;">
+      Simpan semua transaksi ke database Supabase supaya laporan bisa diakses dari mana saja
+      dan tidak hilang kalau browser dibersihkan. Aplikasi tetap jalan normal tanpa ini.
+    </p>
+    <label>Project URL</label>
+    <input class="txt" type="text" id="sbUrl" placeholder="https://xxxxx.supabase.co">
+    <label>Anon / Public Key</label>
+    <input class="txt" type="text" id="sbKey" placeholder="eyJhbGciOi...">
+    <div id="cloudStatus" style="font-size:13px;line-height:1.6;margin-bottom:8px;"></div>
+    <div class="modal-actions" style="margin-top:8px;">
+      <button class="btn btn-cancel" onclick="closeCloud()">Tutup</button>
+      <button class="btn btn-cancel" onclick="cloudPull()">⬇ Tarik Data</button>
+      <button class="btn btn-primary" onclick="saveCloudSettings()">Simpan &amp; Tes</button>
+    </div>
+    <details style="margin-top:16px;">
+      <summary style="font-size:13px;font-weight:600;cursor:pointer;color:#555;">Cara setup Supabase (sekali saja)</summary>
+      <ol style="font-size:12px;color:#555;line-height:1.8;margin:10px 0 10px 18px;">
+        <li>Buat akun gratis di <b>supabase.com</b> → New Project</li>
+        <li>Di project: buka <b>SQL Editor</b> → paste SQL di bawah → Run</li>
+        <li>Buka <b>Settings → API</b>: salin <b>Project URL</b> dan <b>anon public key</b> ke kolom di atas → Simpan &amp; Tes</li>
+        <li>Untuk lihat/export laporan: buka <b>Table Editor → pos_transactions</b> di dashboard Supabase (bisa export CSV dari sana)</li>
+      </ol>
+      <textarea class="sql" readonly onclick="this.select()">create table if not exists pos_transactions (
+  uid text primary key,
+  trx_id text,
+  time timestamptz,
+  channel text,
+  method text,
+  ref text,
+  subtotal numeric,
+  discount numeric,
+  tax numeric,
+  total numeric,
+  commission numeric,
+  net numeric,
+  items jsonb
+);
+alter table pos_transactions enable row level security;
+create policy "pos_anon_select" on pos_transactions
+  for select to anon using (true);
+create policy "pos_anon_insert" on pos_transactions
+  for insert to anon with check (true);</textarea>
+      <p style="font-size:11px;color:#999;line-height:1.6;margin-top:8px;">
+        ⚠️ Anon key ini memberi akses baca/tulis tabel transaksi — jangan bagikan link aplikasi + key ke orang luar.
+      </p>
+    </details>
+  </div>
+</div>
+
 <!-- ═══ RECEIPT MODAL ═══ -->
 <div class="modal-overlay" id="receiptModal">
   <div class="modal">
@@ -406,12 +470,22 @@ function loadData() {
   return { products: defaultProducts, transactions: [], nextTrxNum: 1 };
 }
 
+let quotaWarned = false;
 function saveData() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch(e) {}
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+  catch(e) {
+    if (!quotaWarned) {
+      quotaWarned = true;
+      alert('Penyimpanan browser hampir penuh — perubahan terakhir mungkin tidak tersimpan. Coba hapus beberapa foto produk.');
+    }
+  }
 }
 
 let state = loadData();
 if (!state.settings) state.settings = { commGoFood: 20, commGrabFood: 30 };
+if (!state.settings.supabaseUrl) state.settings.supabaseUrl = '';
+if (!state.settings.supabaseKey) state.settings.supabaseKey = '';
+if (!state.unsynced) state.unsynced = [];   // trx uids waiting to reach the cloud
 let cart = [];          // { productId, qty }
 let activeCat = 'Semua';
 let payMethod = 'Tunai';
@@ -479,8 +553,11 @@ function renderProducts() {
       else if (left <= 5) { stockClass = 'low'; stockText = 'Sisa ' + left + '!'; }
       const card = document.createElement('div');
       card.className = 'product-card' + (left <= 0 ? ' out' : '');
+      const thumb = p.img
+        ? `<img class="product-thumb" src="${p.img}" alt="${esc(p.name)}">`
+        : `<div class="product-thumb">${p.emoji}</div>`;
       card.innerHTML = `
-        <div class="product-emoji">${p.emoji}</div>
+        ${thumb}
         <div class="product-name">${esc(p.name)}</div>
         <div class="product-price">${fmt(p.price)}</div>
         <div class="product-stock ${stockClass}">${stockText}</div>
@@ -652,6 +729,7 @@ function confirmPayment() {
   const rate = channelRate(channel);
   const commission = Math.round(t.total * rate / 100);
   const trx = {
+    uid: Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
     id: 'TRX-' + String(state.nextTrxNum).padStart(4, '0'),
     time: new Date().toISOString(),
     items: cart.map(c => {
@@ -672,12 +750,14 @@ function confirmPayment() {
     if (p) p.stock = Math.max(0, p.stock - c.qty);
   });
 
+  state.unsynced.push(trx.uid);
   saveData();
   closePayment();
   showReceipt(trx);
   channel = 'Toko';
   renderChannelChips();
   clearCart();
+  syncNow();
 }
 
 // ── RECEIPT ───────────────────────────────────────────────────────────────
@@ -719,7 +799,15 @@ function renderProductTable() {
   tbody.innerHTML = '';
   state.products.forEach((p, i) => {
     const tr = document.createElement('tr');
+    const thumb = p.img
+      ? `<img src="${p.img}" style="width:64px;height:36px;object-fit:cover;border-radius:6px;vertical-align:middle;">`
+      : `<span style="font-size:20px;vertical-align:middle;">${esc(p.emoji)}</span>`;
     tr.innerHTML = `
+      <td style="white-space:nowrap;">
+        ${thumb}
+        <label class="add-btn" style="font-size:11px;padding:4px 8px;cursor:pointer;margin-left:6px;display:inline-block;" title="Upload foto (otomatis dipotong 16:9)">📷<input type="file" accept="image/*" style="display:none;" onchange="uploadImage(${i}, this)"></label>
+        ${p.img ? `<button class="del-btn" onclick="removeImage(${i})" title="Hapus foto">✕</button>` : ''}
+      </td>
       <td>
         <input class="tbl-input" type="text" value="${esc(p.emoji)}" style="width:44px;text-align:center;" onchange="state.products[${i}].emoji=this.value;saveData();refreshPos();">
         <input class="tbl-input" type="text" value="${esc(p.name)}" style="width:180px;margin-left:6px;" onchange="state.products[${i}].name=this.value;saveData();refreshPos();">
@@ -756,6 +844,38 @@ function refreshPos() {
   renderCatChips();
   renderProducts();
   renderCart();
+}
+
+// Photo upload: cover-crop to 16:9 (480x270 JPEG) so it stays small in localStorage
+function uploadImage(i, input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      const W = 480, H = 270;
+      const canvas = document.createElement('canvas');
+      canvas.width = W; canvas.height = H;
+      const ctx = canvas.getContext('2d');
+      const scale = Math.max(W / img.width, H / img.height);
+      const w = img.width * scale, h = img.height * scale;
+      ctx.drawImage(img, (W - w) / 2, (H - h) / 2, w, h);
+      state.products[i].img = canvas.toDataURL('image/jpeg', 0.8);
+      saveData();
+      renderProductTable();
+      refreshPos();
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function removeImage(i) {
+  delete state.products[i].img;
+  saveData();
+  renderProductTable();
+  refreshPos();
 }
 
 // ── RIWAYAT PAGE ──────────────────────────────────────────────────────────
@@ -913,11 +1033,161 @@ function renderReportCharts(weekTrx) {
   });
 }
 
+// ── CLOUD SYNC (SUPABASE) ─────────────────────────────────────────────────
+function cloudEnabled() { return !!(state.settings.supabaseUrl && state.settings.supabaseKey); }
+
+function sbFetch(path, opts = {}) {
+  const url = state.settings.supabaseUrl.replace(/\/+$/, '') + path;
+  return fetch(url, {
+    ...opts,
+    headers: {
+      'apikey': state.settings.supabaseKey,
+      'Authorization': 'Bearer ' + state.settings.supabaseKey,
+      'Content-Type': 'application/json',
+      ...(opts.headers || {}),
+    },
+  });
+}
+
+function trxToRow(t) {
+  return {
+    uid: t.uid, trx_id: t.id, time: t.time,
+    channel: t.channel || 'Toko', method: t.method, ref: t.ref || '',
+    subtotal: t.subtotal, discount: t.discount, tax: t.tax, total: t.total,
+    commission: t.commission || 0, net: t.net != null ? t.net : t.total,
+    items: t.items,
+  };
+}
+
+async function syncNow() {
+  if (!cloudEnabled() || state.unsynced.length === 0) { updateCloudBadge(); return; }
+  // older transactions saved before cloud sync existed may lack a uid
+  state.transactions.forEach(t => {
+    if (!t.uid) t.uid = new Date(t.time).getTime().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+  });
+  const rows = state.transactions.filter(t => state.unsynced.includes(t.uid)).map(trxToRow);
+  if (rows.length === 0) { state.unsynced = []; saveData(); updateCloudBadge(); return; }
+  try {
+    const res = await sbFetch('/rest/v1/pos_transactions?on_conflict=uid', {
+      method: 'POST',
+      headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify(rows),
+    });
+    if (res.ok) {
+      const sent = rows.map(r => r.uid);
+      state.unsynced = state.unsynced.filter(u => !sent.includes(u));
+      saveData();
+    }
+  } catch (e) { /* offline — stays queued, retried on next sale or reload */ }
+  updateCloudBadge();
+}
+
+function queueAllForSync() {
+  state.transactions.forEach(t => {
+    if (!t.uid) t.uid = new Date(t.time).getTime().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+    if (!state.unsynced.includes(t.uid)) state.unsynced.push(t.uid);
+  });
+  saveData();
+}
+
+async function cloudPull() {
+  const status = document.getElementById('cloudStatus');
+  if (!cloudEnabled()) { status.innerHTML = '<span style="color:#c0392b;">Isi URL dan key dulu, lalu Simpan &amp; Tes.</span>'; return; }
+  status.textContent = 'Mengambil data…';
+  try {
+    const res = await sbFetch('/rest/v1/pos_transactions?select=*&order=time.desc&limit=5000');
+    if (!res.ok) throw new Error(res.status);
+    const rows = await res.json();
+    const known = new Set(state.transactions.map(t => t.uid).filter(Boolean));
+    let added = 0;
+    rows.forEach(r => {
+      if (known.has(r.uid)) return;
+      state.transactions.push({
+        uid: r.uid, id: r.trx_id, time: r.time, channel: r.channel, method: r.method,
+        ref: r.ref, subtotal: +r.subtotal, discount: +r.discount, tax: +r.tax,
+        total: +r.total, commission: +r.commission, net: +r.net,
+        items: typeof r.items === 'string' ? JSON.parse(r.items) : (r.items || []),
+        cash: +r.total, change: 0,
+      });
+      added++;
+    });
+    state.transactions.sort((a, b) => new Date(b.time) - new Date(a.time));
+    saveData();
+    renderHistory(); renderReport();
+    status.innerHTML = '<span style="color:#27ae60;">✓ ' + added + ' transaksi baru diambil dari cloud (total ' + state.transactions.length + ').</span>';
+  } catch (e) {
+    status.innerHTML = '<span style="color:#c0392b;">Gagal mengambil data. Cek koneksi / URL / key.</span>';
+  }
+}
+
+function openCloud() {
+  document.getElementById('sbUrl').value = state.settings.supabaseUrl;
+  document.getElementById('sbKey').value = state.settings.supabaseKey;
+  document.getElementById('cloudStatus').textContent = '';
+  document.getElementById('cloudModal').classList.add('show');
+}
+function closeCloud() { document.getElementById('cloudModal').classList.remove('show'); }
+
+async function saveCloudSettings() {
+  state.settings.supabaseUrl = document.getElementById('sbUrl').value.trim();
+  state.settings.supabaseKey = document.getElementById('sbKey').value.trim();
+  saveData();
+  const status = document.getElementById('cloudStatus');
+  if (!cloudEnabled()) { status.innerHTML = 'Cloud dimatikan (kolom kosong).'; updateCloudBadge(); return; }
+  status.textContent = 'Mengetes koneksi…';
+  try {
+    const res = await sbFetch('/rest/v1/pos_transactions?select=uid&limit=1');
+    if (res.ok) {
+      status.innerHTML = '<span style="color:#27ae60;">✓ Terhubung! Transaksi lama ikut diantre untuk sinkron.</span>';
+      queueAllForSync();
+      syncNow();
+    } else if (res.status === 404) {
+      status.innerHTML = '<span style="color:#c0392b;">Terhubung, tapi tabel belum ada — jalankan SQL di bawah dulu di Supabase SQL Editor.</span>';
+    } else {
+      status.innerHTML = '<span style="color:#c0392b;">Gagal (kode ' + res.status + '). Cek URL dan anon key.</span>';
+    }
+  } catch (e) {
+    status.innerHTML = '<span style="color:#c0392b;">Tidak bisa terhubung. Cek URL (harus https://xxx.supabase.co).</span>';
+  }
+  updateCloudBadge();
+}
+
+function updateCloudBadge() {
+  const b = document.getElementById('cloudBadge');
+  if (!cloudEnabled()) { b.className = 'cloud-badge'; b.textContent = '☁️ off'; }
+  else if (state.unsynced.length > 0) { b.className = 'cloud-badge pending'; b.textContent = '☁️ ' + state.unsynced.length + ' antre'; }
+  else { b.className = 'cloud-badge on'; b.textContent = '☁️ sinkron'; }
+}
+
+// ── CSV EXPORT ────────────────────────────────────────────────────────────
+function exportCSV() {
+  if (state.transactions.length === 0) { alert('Belum ada transaksi.'); return; }
+  const esc2 = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const header = ['No Transaksi','Waktu','Kanal','Metode','No Pesanan','Item','Subtotal','Diskon','Pajak','Total','Komisi','Bersih'];
+  const lines = [header.join(',')];
+  state.transactions.forEach(t => {
+    lines.push([
+      esc2(t.id), esc2(new Date(t.time).toLocaleString('id-ID')),
+      esc2(t.channel || 'Toko'), esc2(t.method), esc2(t.ref || ''),
+      esc2(t.items.map(it => it.name + ' x' + it.qty).join('; ')),
+      t.subtotal, t.discount, t.tax, t.total, t.commission || 0, t.net != null ? t.net : t.total,
+    ].join(','));
+  });
+  const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'laporan-kasir-' + dayKey(new Date()) + '.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 // ── INIT ──────────────────────────────────────────────────────────────────
 renderCatChips();
 renderChannelChips();
 renderProducts();
 renderCart();
+updateCloudBadge();
+if (cloudEnabled()) syncNow();
 </script>
 </body>
 </html>

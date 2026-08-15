@@ -806,12 +806,11 @@ function renderProductTable() {
     tr.innerHTML = `
       <td style="white-space:nowrap;">
         ${thumb}
-        <label class="add-btn" style="font-size:11px;padding:4px 8px;cursor:pointer;margin-left:6px;display:inline-block;" title="Upload foto (otomatis dipotong 16:9)">📷<input type="file" accept="image/*" style="display:none;" onchange="uploadImage(${i}, this)"></label>
+        <label class="add-btn" style="font-size:11px;padding:4px 8px;cursor:pointer;margin-left:6px;display:inline-block;" title="Upload foto — format & ukuran bebas, tampil 16:9 di kasir">📷<input type="file" accept="image/*" style="display:none;" onchange="uploadImage(${i}, this)"></label>
         ${p.img ? `<button class="del-btn" onclick="removeImage(${i})" title="Hapus foto">✕</button>` : ''}
       </td>
       <td>
-        <input class="tbl-input" type="text" value="${esc(p.emoji)}" style="width:44px;text-align:center;" onchange="state.products[${i}].emoji=this.value;saveData();refreshPos();">
-        <input class="tbl-input" type="text" value="${esc(p.name)}" style="width:180px;margin-left:6px;" onchange="state.products[${i}].name=this.value;saveData();refreshPos();">
+        <input class="tbl-input" type="text" value="${esc(p.name)}" style="width:230px;" onchange="state.products[${i}].name=this.value;saveData();refreshPos();">
       </td>
       <td><input class="tbl-input" type="text" value="${esc(p.cat)}" style="width:100px;" onchange="state.products[${i}].cat=this.value;saveData();refreshPos();"></td>
       <td><input class="tbl-input" type="number" value="${p.price}" step="500" style="width:110px;" onchange="state.products[${i}].price=+this.value;saveData();refreshPos();"></td>
@@ -847,7 +846,9 @@ function refreshPos() {
   renderCart();
 }
 
-// Photo upload: cover-crop to 16:9 (480x270 JPEG) so it stays small in localStorage
+// Photo upload: any format/ratio is accepted. The picture keeps its own
+// proportions in storage (only scaled down to stay small in localStorage);
+// the 16:9 look is done at display time by CSS, so nothing is cut off the file.
 function uploadImage(i, input) {
   const file = input.files[0];
   if (!file) return;
@@ -855,18 +856,21 @@ function uploadImage(i, input) {
   reader.onload = e => {
     const img = new Image();
     img.onload = () => {
-      const W = 480, H = 270;
+      const MAX = 640;
+      const scale = Math.min(1, MAX / Math.max(img.width, img.height));
       const canvas = document.createElement('canvas');
-      canvas.width = W; canvas.height = H;
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
       const ctx = canvas.getContext('2d');
-      const scale = Math.max(W / img.width, H / img.height);
-      const w = img.width * scale, h = img.height * scale;
-      ctx.drawImage(img, (W - w) / 2, (H - h) / 2, w, h);
-      state.products[i].img = canvas.toDataURL('image/jpeg', 0.8);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);   // keeps PNG transparency readable
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      state.products[i].img = canvas.toDataURL('image/jpeg', 0.78);
       saveData();
       renderProductTable();
       refreshPos();
     };
+    img.onerror = () => alert('File itu tidak bisa dibaca sebagai gambar. Coba foto lain (JPG/PNG/HEIC/WebP).');
     img.src = e.target.result;
   };
   reader.readAsDataURL(file);

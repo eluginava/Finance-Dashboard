@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MUGI POS - Aplikasi POS MUGI</title>
+<link rel="manifest" href="pos.webmanifest">
+<meta name="theme-color" content="#1a1a1a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="MUGI POS">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192.png">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -398,6 +406,21 @@
       </div>
       <p style="font-size:12px;color:#888;line-height:1.6;margin-top:12px;">
         Setiap transaksi dicatat atas nama kasir yang sedang bertugas, dan bisa dilihat di Riwayat, struk, laporan, serta file CSV.
+      </p>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Pasang di HP</div>
+      <p style="font-size:13px;color:#555;line-height:1.6;margin-bottom:12px;">
+        Pasang MUGI POS supaya punya ikon sendiri di layar HP, buka layar penuh tanpa alamat browser,
+        dan tetap bisa dipakai jualan walau internet mati.
+      </p>
+      <button class="add-btn" id="installBtn" style="display:none;" onclick="installApp()">📲 Pasang Aplikasi</button>
+      <button class="add-btn" onclick="installApp()">Cara pasang manual</button>
+      <p style="font-size:12px;color:#888;line-height:1.6;margin-top:12px;">
+        Android (Chrome): menu ⋮ → <b>Tambahkan ke layar utama</b>.<br>
+        iPhone (Safari): tombol Bagikan → <b>Add to Home Screen</b>.<br>
+        Transaksi saat offline tetap tersimpan, dan otomatis terkirim ke cloud begitu internet kembali.
       </p>
     </div>
 
@@ -1671,6 +1694,41 @@ renderCart();
 updateCloudBadge();
 if (cloudEnabled()) { syncNow(); syncProducts(); }
 if (!state.cashier) openShift(false);   // ask who is on shift before the first sale
+
+// ── INSTALLABLE APP (PWA) ─────────────────────────────────────────────────
+// Registers the offline cache. Only works over http(s), not when the file is
+// opened directly from disk, so failures here are harmless.
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+
+// "Pasang Aplikasi" button appears when Android/Chrome offers installation
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  installPrompt = e;
+  const btn = document.getElementById('installBtn');
+  if (btn) btn.style.display = 'inline-block';
+});
+
+async function installApp() {
+  if (!installPrompt) {
+    alert('Kalau tombol pasang tidak muncul:\n\n• Android/Chrome: menu ⋮ → "Tambahkan ke layar utama"\n• iPhone/Safari: tombol Bagikan → "Add to Home Screen"');
+    return;
+  }
+  installPrompt.prompt();
+  await installPrompt.userChoice;
+  installPrompt = null;
+  const btn = document.getElementById('installBtn');
+  if (btn) btn.style.display = 'none';
+}
+
+window.addEventListener('appinstalled', () => {
+  const btn = document.getElementById('installBtn');
+  if (btn) btn.style.display = 'none';
+});
 </script>
 </body>
 </html>

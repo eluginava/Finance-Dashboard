@@ -16,6 +16,18 @@
   .cloud-badge.on { background: #e8f5e9; color: #2e7d32; border-color: #c8e6c9; }
   .cloud-badge.pending { background: #fff3e0; color: #e65100; border-color: #ffe0b2; }
 
+  .header h1 { display: flex; align-items: center; gap: 8px; }
+  #brandLogo img { height: 30px; width: auto; max-width: 120px; object-fit: contain; display: block; }
+  .profile-btn { width: 34px; height: 34px; border-radius: 50%; border: 1px solid #e5e5e0; background: #1a1a1a; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .profile-btn:hover { opacity: 0.85; }
+
+  .cashier-bar { background: #fff; border: 1px solid #e5e5e0; border-radius: 10px; padding: 10px 16px; margin-bottom: 14px; display: flex; align-items: center; gap: 10px; font-size: 13px; }
+  .cashier-bar .who { font-weight: 600; }
+  .cashier-bar .swap { margin-left: auto; font-size: 12px; padding: 5px 12px; border: 1px solid #e5e5e0; background: #fafafa; border-radius: 8px; cursor: pointer; color: #555; font-family: inherit; }
+
+  .logo-preview { width: 120px; height: 68px; border: 1px dashed #ccc; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 30px; background: #fafafa; overflow: hidden; }
+  .logo-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
   .tabs { display: flex; gap: 6px; }
   .tab-btn { font-size: 13px; font-weight: 500; padding: 8px 18px; border-radius: 8px; border: 1px solid transparent; background: none; cursor: pointer; color: #888; font-family: inherit; transition: all 0.15s; }
   .tab-btn:hover { background: #f5f5f3; }
@@ -190,7 +202,7 @@
 <body>
 
 <div class="header">
-  <h1>🏪 MUGI POS</h1>
+  <h1 id="brandTitle"><span id="brandLogo">🏪</span> <span id="brandName">MUGI POS</span></h1>
   <div class="tabs">
     <button class="tab-btn active" data-page="kasir" onclick="switchPage('kasir')">Kasir</button>
     <button class="tab-btn" data-page="produk" onclick="switchPage('produk')">Produk</button>
@@ -200,6 +212,9 @@
   <div style="display:flex;align-items:center;gap:8px;">
     <button class="cloud-badge" id="cloudBadge" onclick="openCloud()">☁️ off</button>
     <span class="date-label" id="currentDate"></span>
+    <button class="profile-btn" id="profileBtn" onclick="switchPage('profil')" title="Profil & Pengaturan">
+      <span id="cashierInitial">?</span>
+    </button>
   </div>
 </div>
 
@@ -207,6 +222,12 @@
 
   <!-- ═══ KASIR ═══ -->
   <div class="page active" id="page-kasir">
+    <div class="cashier-bar">
+      <span>🧑‍🍳 Kasir bertugas:</span>
+      <span class="who" id="cashierNameLabel">—</span>
+      <span style="color:#888;" id="shiftSince"></span>
+      <button class="swap" onclick="openShift(true)">Ganti Kasir</button>
+    </div>
     <div class="pos-layout">
       <div>
         <div class="search-bar">
@@ -332,7 +353,55 @@
       <div id="methodBreakdown" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;"></div>
     </div>
 
-    <div class="section" style="margin-top:16px;border-color:#f0dcdc;">
+    <div class="section" style="margin-top:16px;">
+      <div class="section-title">Penjualan per Kasir (7 hari)</div>
+      <div id="cashierBreakdown"></div>
+    </div>
+  </div>
+
+  <!-- ═══ PROFIL ═══ -->
+  <div class="page" id="page-profil">
+    <div class="section">
+      <div class="section-title">Identitas Toko</div>
+      <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;">
+        <div>
+          <label style="font-size:12px;color:#888;display:block;margin-bottom:6px;">Logo</label>
+          <div class="logo-preview" id="logoPreview">🏪</div>
+          <div style="margin-top:8px;display:flex;gap:6px;">
+            <label class="add-btn" style="font-size:12px;padding:5px 12px;cursor:pointer;">Pilih Logo<input type="file" accept="image/*" style="display:none;" onchange="uploadLogo(this)"></label>
+            <button class="add-btn" style="font-size:12px;padding:5px 12px;" onclick="removeLogo()">Hapus</button>
+          </div>
+          <p style="font-size:11px;color:#888;margin-top:8px;max-width:200px;line-height:1.5;">
+            Format bebas (PNG/JPG). Logo tampil di header &amp; struk.
+          </p>
+        </div>
+        <div style="flex:1;min-width:220px;">
+          <label style="font-size:12px;color:#888;display:block;margin-bottom:6px;">Nama Toko</label>
+          <input class="tbl-input" type="text" id="storeNameInput" style="width:100%;max-width:300px;" placeholder="MUGI POS" onchange="saveStoreName(this.value)">
+          <p style="font-size:11px;color:#888;margin-top:8px;line-height:1.5;">Muncul di header aplikasi dan di struk pembayaran.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">
+        Kasir &amp; Shift
+        <span class="badge" id="shiftBadge">belum mulai</span>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+        <button class="add-btn" onclick="openShift(true)">🧑‍🍳 Mulai / Ganti Shift</button>
+        <button class="add-btn" onclick="endShift()">Akhiri Shift</button>
+      </div>
+      <div style="margin-top:14px;">
+        <div style="font-size:12px;color:#888;margin-bottom:6px;">Daftar kasir tersimpan</div>
+        <div id="cashierList" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+      </div>
+      <p style="font-size:12px;color:#888;line-height:1.6;margin-top:12px;">
+        Setiap transaksi dicatat atas nama kasir yang sedang bertugas, dan bisa dilihat di Riwayat, struk, laporan, serta file CSV.
+      </p>
+    </div>
+
+    <div class="section" style="border-color:#f0dcdc;">
       <div class="section-title">Reset Data</div>
       <p style="font-size:13px;color:#555;line-height:1.6;margin-bottom:14px;">
         Sudah selesai uji coba? Hapus data tes di sini supaya laporan mulai dari nol.
@@ -345,7 +414,7 @@
         <b>Hapus Semua Transaksi</b> — riwayat &amp; laporan dikosongkan, nomor transaksi kembali ke TRX-0001.
         Produk, foto, dan stok tidak diubah.<br>
         <b>Reset ke Awal</b> — transaksi dihapus <i>dan</i> daftar produk kembali ke contoh bawaan (foto ikut hilang, stok penuh lagi).
-        Pengaturan cloud &amp; persentase komisi tetap tersimpan.<br>
+        Logo, nama toko, kasir, pengaturan cloud &amp; komisi tetap tersimpan.<br>
         <span id="resetCloudNote" style="color:#e65100;display:none;">⚠️ Cloud aktif: data di Supabase <b>tidak</b> ikut terhapus. Hapus juga baris di Table Editor Supabase, kalau tidak data tes akan kembali saat menekan "Tarik Data".</span>
       </p>
     </div>
@@ -397,6 +466,24 @@
   </div>
 </div>
 
+<!-- ═══ SHIFT / CASHIER MODAL ═══ -->
+<div class="modal-overlay" id="shiftModal">
+  <div class="modal" style="max-width:380px;">
+    <h2>🧑‍🍳 Mulai Shift</h2>
+    <p style="font-size:13px;color:#555;line-height:1.6;margin-bottom:14px;">
+      Siapa yang bertugas sekarang? Semua transaksi akan dicatat atas nama ini.
+    </p>
+    <label>Nama kasir</label>
+    <input class="txt" type="text" id="shiftNameInput" placeholder="mis. Rina" onkeydown="if(event.key==='Enter')startShift()">
+    <div id="shiftQuickPick" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px;"></div>
+    <div id="shiftError" style="font-size:12px;color:#c0392b;margin-bottom:6px;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" id="shiftCancelBtn" onclick="closeShift()">Batal</button>
+      <button class="btn btn-primary" onclick="startShift()">Mulai Shift</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ CLOUD SETTINGS MODAL ═══ -->
 <div class="modal-overlay" id="cloudModal">
   <div class="modal">
@@ -431,6 +518,7 @@
   channel text,
   method text,
   ref text,
+  cashier text,
   subtotal numeric,
   discount numeric,
   tax numeric,
@@ -465,7 +553,10 @@ create policy "pos_prod_insert" on pos_products
 create policy "pos_prod_update" on pos_products
   for update to anon using (true) with check (true);
 create policy "pos_prod_delete" on pos_products
-  for delete to anon using (true);</textarea>
+  for delete to anon using (true);
+
+-- kalau tabel transaksi sudah dibuat sebelum ada fitur kasir, jalankan ini juga:
+alter table pos_transactions add column if not exists cashier text;</textarea>
       <p style="font-size:11px;color:#999;line-height:1.6;margin-top:8px;">
         ⚠️ Anon key ini memberi akses baca/tulis tabel transaksi — jangan bagikan link aplikasi + key ke orang luar.
       </p>
@@ -530,6 +621,11 @@ if (!state.settings.supabaseUrl) state.settings.supabaseUrl = '';
 if (!state.settings.supabaseKey) state.settings.supabaseKey = '';
 if (!state.unsynced) state.unsynced = [];   // trx uids waiting to reach the cloud
 if (!state.unsyncedProducts) state.unsyncedProducts = [];   // product ids waiting to reach the cloud
+if (!state.settings.storeName) state.settings.storeName = 'MUGI POS';
+if (!state.settings.logo) state.settings.logo = '';
+if (!state.settings.cashiers) state.settings.cashiers = [];   // remembered names
+if (state.cashier === undefined) state.cashier = '';          // who is on shift now
+if (!state.shiftStart) state.shiftStart = '';
 let cart = [];          // { productId, qty }
 let activeCat = 'Semua';
 let payMethod = 'Tunai';
@@ -555,12 +651,130 @@ const months = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov
 const now = new Date();
 document.getElementById('currentDate').textContent = days[now.getDay()] + ', ' + now.getDate() + ' ' + months[now.getMonth()] + ' ' + now.getFullYear();
 
+// ── BRANDING (logo & store name) ──────────────────────────────────────────
+function renderBranding() {
+  const logo = document.getElementById('brandLogo');
+  logo.innerHTML = state.settings.logo
+    ? '<img src="' + state.settings.logo + '" alt="Logo">'
+    : '🏪';
+  document.getElementById('brandName').textContent = state.settings.storeName;
+  document.title = state.settings.storeName + ' - Aplikasi POS MUGI';
+  const prev = document.getElementById('logoPreview');
+  if (prev) prev.innerHTML = state.settings.logo ? '<img src="' + state.settings.logo + '">' : '🏪';
+  const input = document.getElementById('storeNameInput');
+  if (input) input.value = state.settings.storeName;
+}
+
+function uploadLogo(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 320;                       // logos stay small; kept as-is in shape
+      const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      state.settings.logo = canvas.toDataURL('image/png');   // png keeps transparency
+      saveData();
+      renderBranding();
+    };
+    img.onerror = () => alert('File itu tidak bisa dibaca sebagai gambar. Coba PNG atau JPG.');
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function removeLogo() {
+  state.settings.logo = '';
+  saveData();
+  renderBranding();
+}
+
+function saveStoreName(v) {
+  state.settings.storeName = (v || '').trim() || 'MUGI POS';
+  saveData();
+  renderBranding();
+}
+
+// ── CASHIER / SHIFT ───────────────────────────────────────────────────────
+function renderCashier() {
+  const name = state.cashier;
+  document.getElementById('cashierNameLabel').textContent = name || 'belum dipilih';
+  document.getElementById('cashierInitial').textContent = name ? name.trim().charAt(0).toUpperCase() : '?';
+  document.getElementById('profileBtn').title = name ? 'Profil — kasir: ' + name : 'Profil & Pengaturan';
+
+  const since = document.getElementById('shiftSince');
+  if (name && state.shiftStart) {
+    const d = new Date(state.shiftStart);
+    since.textContent = '· sejak ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+  } else since.textContent = '';
+
+  const badge = document.getElementById('shiftBadge');
+  if (badge) badge.textContent = name ? 'bertugas: ' + name : 'belum mulai';
+
+  const list = document.getElementById('cashierList');
+  if (list) {
+    list.innerHTML = state.settings.cashiers.length
+      ? state.settings.cashiers.map(c =>
+          `<span class="badge" style="font-size:12px;padding:5px 12px;${c === name ? 'background:#e8f5e9;color:#2e7d32;border-color:#c8e6c9;' : ''}">${esc(c)}
+            <button class="del-btn" style="font-size:11px;margin-left:4px;" title="Hapus nama" onclick="removeCashier('${esc(c).replace(/'/g, "\\'")}')">✕</button>
+          </span>`).join('')
+      : '<span style="font-size:12px;color:#bbb;">belum ada</span>';
+  }
+}
+
+function openShift(cancellable) {
+  document.getElementById('shiftNameInput').value = '';
+  document.getElementById('shiftError').textContent = '';
+  document.getElementById('shiftCancelBtn').style.display = cancellable ? '' : 'none';
+  const quick = document.getElementById('shiftQuickPick');
+  quick.innerHTML = state.settings.cashiers.map(c =>
+    `<button class="add-btn" style="font-size:12px;padding:5px 12px;" onclick="document.getElementById('shiftNameInput').value='${esc(c).replace(/'/g, "\\'")}';startShift();">${esc(c)}</button>`
+  ).join('');
+  document.getElementById('shiftModal').classList.add('show');
+  setTimeout(() => document.getElementById('shiftNameInput').focus(), 50);
+}
+
+function closeShift() { document.getElementById('shiftModal').classList.remove('show'); }
+
+function startShift() {
+  const name = document.getElementById('shiftNameInput').value.trim();
+  if (!name) { document.getElementById('shiftError').textContent = 'Nama kasir belum diisi.'; return; }
+  state.cashier = name;
+  state.shiftStart = new Date().toISOString();
+  if (!state.settings.cashiers.includes(name)) state.settings.cashiers.push(name);
+  saveData();
+  renderCashier();
+  closeShift();
+}
+
+function endShift() {
+  if (!state.cashier) { alert('Belum ada kasir yang bertugas.'); return; }
+  if (!confirm('Akhiri shift ' + state.cashier + '?')) return;
+  state.cashier = '';
+  state.shiftStart = '';
+  saveData();
+  renderCashier();
+}
+
+function removeCashier(name) {
+  state.settings.cashiers = state.settings.cashiers.filter(c => c !== name);
+  saveData();
+  renderCashier();
+}
+
 // ── TABS ──────────────────────────────────────────────────────────────────
 function switchPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('page-' + name).classList.add('active');
-  document.querySelector('.tab-btn[data-page="' + name + '"]').classList.add('active');
+  const btn = document.querySelector('.tab-btn[data-page="' + name + '"]');
+  if (btn) btn.classList.add('active');          // 'profil' opens from the avatar, not a tab
+  if (name === 'profil') { renderBranding(); renderCashier(); }
   if (name === 'produk') renderProductTable();
   if (name === 'riwayat') renderHistory();
   if (name === 'laporan') renderReport();
@@ -705,6 +919,7 @@ function renderCart() {
 // ── PAYMENT ───────────────────────────────────────────────────────────────
 function openPayment() {
   if (cart.length === 0) return;
+  if (!state.cashier) { alert('Pilih kasir yang bertugas dulu sebelum menerima pembayaran.'); openShift(true); return; }
   const t = cartTotals();
   document.getElementById('payTotal').textContent = fmt(t.total);
   const online = channel !== 'Toko';
@@ -784,6 +999,7 @@ function confirmPayment() {
     method: online ? channel : payMethod, cash: cash, change: cash - t.total,
     channel: channel, ref: online ? document.getElementById('refInput').value.trim() : '',
     commission: commission, net: t.total - commission,
+    cashier: state.cashier,
   };
   state.nextTrxNum++;
   state.transactions.unshift(trx);
@@ -811,10 +1027,12 @@ function showReceipt(trx) {
   const timeStr = d.getDate() + '/' + (d.getMonth()+1) + '/' + d.getFullYear() + ' ' +
     String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
   let html = `
-    <div class="r-center r-bold">MUGI POS</div>
+    ${state.settings.logo ? `<div class="r-center" style="margin-bottom:6px;"><img src="${state.settings.logo}" style="max-height:44px;max-width:150px;object-fit:contain;"></div>` : ''}
+    <div class="r-center r-bold">${esc(state.settings.storeName)}</div>
     <div class="r-center">Struk Pembayaran</div>
     <div class="r-line"></div>
-    <div class="r-row"><span>${trx.id}</span><span>${timeStr}</span></div>`;
+    <div class="r-row"><span>${trx.id}</span><span>${timeStr}</span></div>
+    ${trx.cashier ? `<div class="r-row"><span>Kasir</span><span>${esc(trx.cashier)}</span></div>` : ''}`;
   if (trx.channel && trx.channel !== 'Toko') {
     html += `<div class="r-row"><span>Kanal</span><span>${trx.channel}${trx.ref ? ' #' + esc(trx.ref) : ''}</span></div>`;
   }
@@ -958,7 +1176,7 @@ function renderHistory() {
       <div class="trx-head">
         <div>
           <div class="trx-id">${trx.id}</div>
-          <div class="trx-time">${timeStr} · ${trx.items.reduce((s,it)=>s+it.qty,0)} item${refStr}</div>
+          <div class="trx-time">${timeStr} · ${trx.items.reduce((s,it)=>s+it.qty,0)} item${refStr}${trx.cashier ? ' · 🧑‍🍳 ' + esc(trx.cashier) : ''}</div>
         </div>
         <span class="trx-method ${mClass}">${trx.method}</span>
         <div class="trx-total">${fmt(trx.total)}</div>
@@ -996,6 +1214,23 @@ function renderReport() {
   document.getElementById('repItems').textContent = todayItems;
 
   document.getElementById('resetCloudNote').style.display = cloudEnabled() ? 'inline' : 'none';
+
+  // per-cashier totals
+  const byCashier = {};
+  weekTrx.forEach(t => {
+    const who = t.cashier || '(tanpa nama)';
+    if (!byCashier[who]) byCashier[who] = { total: 0, count: 0, items: 0 };
+    byCashier[who].total += t.total;
+    byCashier[who].count++;
+    byCashier[who].items += t.items.reduce((a, it) => a + it.qty, 0);
+  });
+  const cashierRows = Object.entries(byCashier).sort((a, b) => b[1].total - a[1].total);
+  document.getElementById('cashierBreakdown').innerHTML = cashierRows.length
+    ? '<table><thead><tr><th>Kasir</th><th>Transaksi</th><th>Item</th><th>Total Penjualan</th></tr></thead><tbody>' +
+      cashierRows.map(([who, v]) =>
+        `<tr><td style="font-weight:500;">🧑‍🍳 ${esc(who)}</td><td>${v.count}</td><td>${v.items}</td><td style="font-weight:600;">${fmt(v.total)}</td></tr>`
+      ).join('') + '</tbody></table>'
+    : '<div style="font-size:13px;color:#bbb;">Belum ada transaksi minggu ini.</div>';
 
   if (typeof Chart !== 'undefined') renderReportCharts(weekTrx);
 
@@ -1102,6 +1337,8 @@ function resetAll() {
     unsynced: [],
     unsyncedProducts: [],
     settings: keepSettings,
+    cashier: state.cashier,          // the person on shift stays logged in
+    shiftStart: state.shiftStart,
   };
   cart = [];
   channel = 'Toko';
@@ -1193,7 +1430,7 @@ function sbFetch(path, opts = {}) {
 function trxToRow(t) {
   return {
     uid: t.uid, trx_id: t.id, time: t.time,
-    channel: t.channel || 'Toko', method: t.method, ref: t.ref || '',
+    channel: t.channel || 'Toko', method: t.method, ref: t.ref || '', cashier: t.cashier || '',
     subtotal: t.subtotal, discount: t.discount, tax: t.tax, total: t.total,
     commission: t.commission || 0, net: t.net != null ? t.net : t.total,
     items: t.items,
@@ -1311,7 +1548,7 @@ async function cloudPull() {
       if (known.has(r.uid)) return;
       state.transactions.push({
         uid: r.uid, id: r.trx_id, time: r.time, channel: r.channel, method: r.method,
-        ref: r.ref, subtotal: +r.subtotal, discount: +r.discount, tax: +r.tax,
+        ref: r.ref, cashier: r.cashier || '', subtotal: +r.subtotal, discount: +r.discount, tax: +r.tax,
         total: +r.total, commission: +r.commission, net: +r.net,
         items: typeof r.items === 'string' ? JSON.parse(r.items) : (r.items || []),
         cash: +r.total, change: 0,
@@ -1406,11 +1643,11 @@ function updateCloudBadge() {
 function exportCSV() {
   if (state.transactions.length === 0) { alert('Belum ada transaksi.'); return; }
   const esc2 = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-  const header = ['No Transaksi','Waktu','Kanal','Metode','No Pesanan','Item','Subtotal','Diskon','Pajak','Total','Komisi','Bersih'];
+  const header = ['No Transaksi','Waktu','Kasir','Kanal','Metode','No Pesanan','Item','Subtotal','Diskon','Pajak','Total','Komisi','Bersih'];
   const lines = [header.join(',')];
   state.transactions.forEach(t => {
     lines.push([
-      esc2(t.id), esc2(new Date(t.time).toLocaleString('id-ID')),
+      esc2(t.id), esc2(new Date(t.time).toLocaleString('id-ID')), esc2(t.cashier || ''),
       esc2(t.channel || 'Toko'), esc2(t.method), esc2(t.ref || ''),
       esc2(t.items.map(it => it.name + ' x' + it.qty).join('; ')),
       t.subtotal, t.discount, t.tax, t.total, t.commission || 0, t.net != null ? t.net : t.total,
@@ -1425,12 +1662,15 @@ function exportCSV() {
 }
 
 // ── INIT ──────────────────────────────────────────────────────────────────
+renderBranding();
+renderCashier();
 renderCatChips();
 renderChannelChips();
 renderProducts();
 renderCart();
 updateCloudBadge();
 if (cloudEnabled()) { syncNow(); syncProducts(); }
+if (!state.cashier) openShift(false);   // ask who is on shift before the first sale
 </script>
 </body>
 </html>

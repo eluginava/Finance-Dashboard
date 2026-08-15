@@ -442,7 +442,9 @@ alter table pos_transactions enable row level security;
 create policy "pos_anon_select" on pos_transactions
   for select to anon using (true);
 create policy "pos_anon_insert" on pos_transactions
-  for insert to anon with check (true);</textarea>
+  for insert to anon with check (true);
+create policy "pos_anon_delete" on pos_transactions
+  for delete to anon using (true);</textarea>
       <p style="font-size:11px;color:#999;line-height:1.6;margin-top:8px;">
         ⚠️ Anon key ini memberi akses baca/tulis tabel transaksi — jangan bagikan link aplikasi + key ke orang luar.
       </p>
@@ -927,6 +929,7 @@ function renderHistory() {
         </div>
         <span class="trx-method ${mClass}">${trx.method}</span>
         <div class="trx-total">${fmt(trx.total)}</div>
+        <button class="del-btn" title="Hapus transaksi ini (salah input)" onclick="event.stopPropagation();voidTransaction(${i})">✕</button>
       </div>
       <div class="trx-detail" id="trxDetail${i}">
         ${trx.items.map(it => `<div class="r-row"><span>${esc(it.name)} x${it.qty}</span><span>${fmt(it.price*it.qty)}</span></div>`).join('')}
@@ -998,6 +1001,46 @@ function renderReport() {
         <div style="font-size:11px;color:#888;margin-top:2px;">${trxs.length} transaksi</div>
       </div>`;
   }).join('');
+}
+
+// ── HAPUS SATU TRANSAKSI (salah input) ────────────────────────────────────
+async function voidTransaction(i) {
+  const trx = state.transactions[i];
+  if (!trx) return;
+  const itemLines = trx.items.map(it => '• ' + it.name + ' x' + it.qty).join('\n');
+  if (!confirm('Hapus transaksi ' + trx.id + ' — ' + fmt(trx.total) + '?\n\n' + itemLines + '\n\nStok barang akan dikembalikan.\nTindakan ini tidak bisa dibatalkan.')) return;
+
+  // put the stock back (matched by product name; skipped if the product was deleted/renamed)
+  let restored = 0, missing = 0;
+  trx.items.forEach(it => {
+    const p = state.products.find(p => p.name === it.name);
+    if (p) { p.stock += it.qty; restored++; } else { missing++; }
+  });
+
+  state.transactions.splice(i, 1);
+  state.unsynced = state.unsynced.filter(u => u !== trx.uid);
+  saveData();
+
+  let cloudMsg = '';
+  if (cloudEnabled() && trx.uid) {
+    try {
+      const res = await sbFetch('/rest/v1/pos_transactions?uid=eq.' + encodeURIComponent(trx.uid), { method: 'DELETE' });
+      cloudMsg = res.ok
+        ? '\n\nData di cloud ikut terhapus.'
+        : '\n\nCatatan: baris di Supabase belum bisa dihapus (izin delete belum aktif). Hapus manual lewat Table Editor, atau jalankan SQL izin delete yang ada di menu ☁️.';
+    } catch (e) {
+      cloudMsg = '\n\nCatatan: sedang offline — hapus juga baris ini di Supabase nanti.';
+    }
+  }
+
+  renderHistory();
+  renderReport();
+  refreshPos();
+  updateCloudBadge();
+  alert('Transaksi ' + trx.id + ' dihapus.' +
+    (restored ? '\nStok ' + restored + ' produk dikembalikan.' : '') +
+    (missing ? '\n' + missing + ' produk tidak ditemukan (sudah dihapus/ganti nama), stoknya tidak diubah.' : '') +
+    cloudMsg);
 }
 
 // ── RESET ─────────────────────────────────────────────────────────────────

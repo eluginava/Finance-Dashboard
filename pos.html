@@ -48,6 +48,15 @@
   .product-stock.low { color: #e65100; font-weight: 500; }
   .product-stock.empty { color: #c62828; font-weight: 500; }
 
+  /* Channel selector */
+  .channel-chips { display: flex; gap: 8px; margin-bottom: 12px; }
+  .channel-chip { flex: 1; font-size: 12px; font-weight: 600; padding: 8px 4px; border-radius: 8px; border: 1.5px solid #e5e5e0; background: #fff; cursor: pointer; color: #888; font-family: inherit; text-align: center; }
+  .channel-chip .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+  .channel-chip.active { border-color: #1a1a1a; color: #1a1a1a; background: #fafafa; }
+  .channel-chip.active.gofood { border-color: #00aa13; color: #00880f; background: #f0fff2; }
+  .channel-chip.active.grabfood { border-color: #00b14f; color: #00913f; background: #f0fff7; }
+  .sum-row.muted { color: #999; font-size: 12px; }
+
   /* Cart */
   .cart { background: #fff; border: 1px solid #e5e5e0; border-radius: 12px; padding: 18px; position: sticky; top: 80px; }
   .cart-title { font-size: 15px; font-weight: 600; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
@@ -135,6 +144,8 @@
   .m-tunai { background: #e8f5e9; color: #2e7d32; }
   .m-qris { background: #e3f2fd; color: #1565c0; }
   .m-kartu { background: #f3e5f5; color: #7b1fa2; }
+  .m-gofood { background: #e6f9e8; color: #00880f; }
+  .m-grabfood { background: #e0f7ec; color: #00913f; }
   .trx-detail { display: none; margin-top: 12px; border-top: 1px solid #f0f0ec; padding-top: 10px; font-size: 13px; color: #555; }
   .trx-detail.show { display: block; }
   .trx-detail .r-row { display: flex; justify-content: space-between; padding: 2px 0; }
@@ -201,6 +212,7 @@
           Keranjang
           <button class="cart-clear" onclick="clearCart()">Kosongkan</button>
         </div>
+        <div class="channel-chips" id="channelChips"></div>
         <div id="cartItems"></div>
         <div class="cart-summary">
           <div class="sum-row"><span>Subtotal</span><span id="cartSubtotal">Rp 0</span></div>
@@ -209,6 +221,8 @@
             <span><input type="checkbox" id="taxCheck" onchange="renderCart()" style="accent-color:#27ae60;vertical-align:middle;margin-right:6px;"><span id="cartTax">Rp 0</span></span>
           </div>
           <div class="sum-row total"><span>Total</span><span id="cartTotal">Rp 0</span></div>
+          <div class="sum-row muted" id="commRow" style="display:none;"><span id="commLabel"></span><span id="commVal"></span></div>
+          <div class="sum-row muted" id="netRow" style="display:none;"><span>Diterima bersih</span><span id="netVal"></span></div>
         </div>
         <button class="pay-btn" id="payBtn" onclick="openPayment()" disabled>Bayar</button>
       </div>
@@ -294,7 +308,15 @@
     </div>
 
     <div class="section" style="margin-top:16px;">
-      <div class="section-title">Metode Pembayaran (7 hari)</div>
+      <div class="section-title">
+        Penjualan per Kanal (7 hari)
+        <span class="badge">% komisi bisa diubah</span>
+      </div>
+      <div id="channelBreakdown" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;"></div>
+    </div>
+
+    <div class="section" style="margin-top:16px;">
+      <div class="section-title">Metode Pembayaran — Toko (7 hari)</div>
       <div id="methodBreakdown" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;"></div>
     </div>
   </div>
@@ -310,17 +332,24 @@
       <span style="font-size:13px;color:#555;">Total tagihan</span>
       <span style="font-size:22px;font-weight:700;" id="payTotal">Rp 0</span>
     </div>
-    <label>Metode pembayaran</label>
-    <div class="method-grid">
-      <button class="method-btn active" data-method="Tunai" onclick="selectMethod('Tunai')">
-        <div class="m-icon">💵</div><div class="m-name">Tunai</div>
-      </button>
-      <button class="method-btn" data-method="QRIS" onclick="selectMethod('QRIS')">
-        <div class="m-icon">📱</div><div class="m-name">QRIS</div>
-      </button>
-      <button class="method-btn" data-method="Kartu" onclick="selectMethod('Kartu')">
-        <div class="m-icon">💳</div><div class="m-name">Kartu</div>
-      </button>
+    <div id="methodSection">
+      <label>Metode pembayaran</label>
+      <div class="method-grid">
+        <button class="method-btn active" data-method="Tunai" onclick="selectMethod('Tunai')">
+          <div class="m-icon">💵</div><div class="m-name">Tunai</div>
+        </button>
+        <button class="method-btn" data-method="QRIS" onclick="selectMethod('QRIS')">
+          <div class="m-icon">📱</div><div class="m-name">QRIS</div>
+        </button>
+        <button class="method-btn" data-method="Kartu" onclick="selectMethod('Kartu')">
+          <div class="m-icon">💳</div><div class="m-name">Kartu</div>
+        </button>
+      </div>
+    </div>
+    <div id="onlineSection" style="display:none;">
+      <div id="onlineNote" style="background:#f0fff2;border:1px solid #cdeccf;border-radius:10px;padding:12px;font-size:13px;color:#00880f;line-height:1.6;margin-bottom:14px;"></div>
+      <label>No. pesanan (opsional)</label>
+      <input type="text" id="refInput" placeholder="mis. GF-1234 / GM-5678" style="width:100%;border:1px solid #e5e5e0;border-radius:8px;padding:11px 14px;font-size:14px;background:#fafafa;outline:none;font-family:inherit;">
     </div>
     <div id="cashSection">
       <label>Uang diterima (Rp)</label>
@@ -382,9 +411,21 @@ function saveData() {
 }
 
 let state = loadData();
+if (!state.settings) state.settings = { commGoFood: 20, commGrabFood: 30 };
 let cart = [];          // { productId, qty }
 let activeCat = 'Semua';
 let payMethod = 'Tunai';
+let channel = 'Toko';   // Toko | GoFood | GrabFood
+
+const CHANNELS = [
+  { id: 'Toko',     label: 'Toko',     cls: '',         dot: '#1a1a1a' },
+  { id: 'GoFood',   label: 'GoFood',   cls: 'gofood',   dot: '#00aa13' },
+  { id: 'GrabFood', label: 'GrabFood', cls: 'grabfood', dot: '#00b14f' },
+];
+
+function channelRate(ch) {
+  return ch === 'GoFood' ? state.settings.commGoFood : ch === 'GrabFood' ? state.settings.commGrabFood : 0;
+}
 
 // ── UTILS ─────────────────────────────────────────────────────────────────
 function fmt(n) { return 'Rp ' + Math.round(n).toLocaleString('id-ID'); }
@@ -449,6 +490,19 @@ function renderProducts() {
     });
 }
 
+// ── KASIR: CHANNEL ────────────────────────────────────────────────────────
+function renderChannelChips() {
+  document.getElementById('channelChips').innerHTML = CHANNELS.map(c =>
+    `<button class="channel-chip ${c.cls} ${channel === c.id ? 'active' : ''}" onclick="selectChannel('${c.id}')"><span class="dot" style="background:${c.dot}"></span>${c.label}</button>`
+  ).join('');
+}
+
+function selectChannel(c) {
+  channel = c;
+  renderChannelChips();
+  renderCart();
+}
+
 // ── KASIR: CART ───────────────────────────────────────────────────────────
 function addToCart(id) {
   const p = state.products.find(p => p.id === id);
@@ -510,7 +564,21 @@ function renderCart() {
   document.getElementById('cartSubtotal').textContent = fmt(t.subtotal);
   document.getElementById('cartTax').textContent = fmt(t.tax);
   document.getElementById('cartTotal').textContent = fmt(t.total);
-  document.getElementById('payBtn').disabled = cart.length === 0;
+
+  const online = channel !== 'Toko';
+  document.getElementById('commRow').style.display = online ? 'flex' : 'none';
+  document.getElementById('netRow').style.display = online ? 'flex' : 'none';
+  if (online) {
+    const rate = channelRate(channel);
+    const comm = Math.round(t.total * rate / 100);
+    document.getElementById('commLabel').textContent = 'Komisi ' + channel + ' (' + rate + '%)';
+    document.getElementById('commVal').textContent = '-' + fmt(comm);
+    document.getElementById('netVal').textContent = fmt(t.total - comm);
+  }
+
+  const payBtn = document.getElementById('payBtn');
+  payBtn.disabled = cart.length === 0;
+  payBtn.textContent = online ? 'Selesaikan Pesanan ' + channel : 'Bayar';
 }
 
 // ── PAYMENT ───────────────────────────────────────────────────────────────
@@ -518,12 +586,26 @@ function openPayment() {
   if (cart.length === 0) return;
   const t = cartTotals();
   document.getElementById('payTotal').textContent = fmt(t.total);
-  payMethod = 'Tunai';
-  document.querySelectorAll('.method-btn').forEach(b => b.classList.toggle('active', b.dataset.method === 'Tunai'));
-  document.getElementById('cashSection').style.display = 'block';
-  document.getElementById('cashInput').value = '';
-  renderCashQuick(t.total);
-  updateChange();
+  const online = channel !== 'Toko';
+  document.getElementById('methodSection').style.display = online ? 'none' : 'block';
+  document.getElementById('onlineSection').style.display = online ? 'block' : 'none';
+  if (online) {
+    const rate = channelRate(channel);
+    const comm = Math.round(t.total * rate / 100);
+    document.getElementById('onlineNote').innerHTML =
+      'Pesanan <b>' + channel + '</b> — pembayaran diterima via aplikasi.<br>' +
+      'Komisi ' + rate + '%: −' + fmt(comm) + ' · Bersih diterima: <b>' + fmt(t.total - comm) + '</b>';
+    document.getElementById('refInput').value = '';
+    document.getElementById('cashSection').style.display = 'none';
+    document.getElementById('confirmPayBtn').disabled = false;
+  } else {
+    payMethod = 'Tunai';
+    document.querySelectorAll('.method-btn').forEach(b => b.classList.toggle('active', b.dataset.method === 'Tunai'));
+    document.getElementById('cashSection').style.display = 'block';
+    document.getElementById('cashInput').value = '';
+    renderCashQuick(t.total);
+    updateChange();
+  }
   document.getElementById('payModal').classList.add('show');
 }
 
@@ -552,7 +634,7 @@ function renderCashQuick(total) {
 function updateChange() {
   const t = cartTotals();
   const btn = document.getElementById('confirmPayBtn');
-  if (payMethod !== 'Tunai') { btn.disabled = false; return; }
+  if (channel !== 'Toko' || payMethod !== 'Tunai') { btn.disabled = false; return; }
   const cash = parseFloat(document.getElementById('cashInput').value) || 0;
   const change = cash - t.total;
   const el = document.getElementById('changeVal');
@@ -563,9 +645,12 @@ function updateChange() {
 
 function confirmPayment() {
   const t = cartTotals();
-  const cash = payMethod === 'Tunai' ? (parseFloat(document.getElementById('cashInput').value) || 0) : t.total;
-  if (payMethod === 'Tunai' && cash < t.total) return;
+  const online = channel !== 'Toko';
+  const cash = (!online && payMethod === 'Tunai') ? (parseFloat(document.getElementById('cashInput').value) || 0) : t.total;
+  if (!online && payMethod === 'Tunai' && cash < t.total) return;
 
+  const rate = channelRate(channel);
+  const commission = Math.round(t.total * rate / 100);
   const trx = {
     id: 'TRX-' + String(state.nextTrxNum).padStart(4, '0'),
     time: new Date().toISOString(),
@@ -574,7 +659,9 @@ function confirmPayment() {
       return { name: p.name, price: p.price, qty: c.qty };
     }),
     subtotal: t.subtotal, discount: t.discount, tax: t.tax, total: t.total,
-    method: payMethod, cash: cash, change: cash - t.total,
+    method: online ? channel : payMethod, cash: cash, change: cash - t.total,
+    channel: channel, ref: online ? document.getElementById('refInput').value.trim() : '',
+    commission: commission, net: t.total - commission,
   };
   state.nextTrxNum++;
   state.transactions.unshift(trx);
@@ -588,6 +675,8 @@ function confirmPayment() {
   saveData();
   closePayment();
   showReceipt(trx);
+  channel = 'Toko';
+  renderChannelChips();
   clearCart();
 }
 
@@ -600,8 +689,11 @@ function showReceipt(trx) {
     <div class="r-center r-bold">KASIR ELVA</div>
     <div class="r-center">Struk Pembayaran</div>
     <div class="r-line"></div>
-    <div class="r-row"><span>${trx.id}</span><span>${timeStr}</span></div>
-    <div class="r-line"></div>`;
+    <div class="r-row"><span>${trx.id}</span><span>${timeStr}</span></div>`;
+  if (trx.channel && trx.channel !== 'Toko') {
+    html += `<div class="r-row"><span>Kanal</span><span>${trx.channel}${trx.ref ? ' #' + esc(trx.ref) : ''}</span></div>`;
+  }
+  html += `<div class="r-line"></div>`;
   trx.items.forEach(it => {
     html += `<div class="r-row"><span>${esc(it.name)} x${it.qty}</span><span>${fmt(it.price * it.qty)}</span></div>`;
   });
@@ -679,14 +771,15 @@ function renderHistory() {
     const d = new Date(trx.time);
     const timeStr = d.getDate() + ' ' + months[d.getMonth()] + ' ' + d.getFullYear() + ', ' +
       String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
-    const mClass = trx.method === 'Tunai' ? 'm-tunai' : trx.method === 'QRIS' ? 'm-qris' : 'm-kartu';
+    const mClass = { Tunai: 'm-tunai', QRIS: 'm-qris', Kartu: 'm-kartu', GoFood: 'm-gofood', GrabFood: 'm-grabfood' }[trx.method] || 'm-tunai';
+    const refStr = trx.ref ? ' · #' + esc(trx.ref) : '';
     const div = document.createElement('div');
     div.className = 'trx-item';
     div.innerHTML = `
       <div class="trx-head">
         <div>
           <div class="trx-id">${trx.id}</div>
-          <div class="trx-time">${timeStr} · ${trx.items.reduce((s,it)=>s+it.qty,0)} item</div>
+          <div class="trx-time">${timeStr} · ${trx.items.reduce((s,it)=>s+it.qty,0)} item${refStr}</div>
         </div>
         <span class="trx-method ${mClass}">${trx.method}</span>
         <div class="trx-total">${fmt(trx.total)}</div>
@@ -724,7 +817,28 @@ function renderReport() {
 
   if (typeof Chart !== 'undefined') renderReportCharts(weekTrx);
 
-  // Method breakdown
+  // Channel breakdown (older transactions without a channel count as Toko)
+  const chIcons = { Toko: '🏪', GoFood: '🛵', GrabFood: '🛵' };
+  document.getElementById('channelBreakdown').innerHTML = CHANNELS.map(c => {
+    const trxs = weekTrx.filter(t => (t.channel || 'Toko') === c.id);
+    const gross = trxs.reduce((s,t) => s + t.total, 0);
+    const comm = trxs.reduce((s,t) => s + (t.commission || 0), 0);
+    const rateInput = c.id === 'Toko' ? '' : `
+        <div style="font-size:11px;color:#888;margin-top:8px;">
+          Komisi <input type="number" value="${channelRate(c.id)}" min="0" max="100" onchange="setComm('${c.id}', this.value)" style="width:48px;border:1px solid #e5e5e0;border-radius:6px;padding:3px 6px;font-size:11px;text-align:right;background:#fff;outline:none;font-family:inherit;"> %
+        </div>`;
+    return `
+      <div style="background:#fafafa;border:1px solid #f0f0ec;border-radius:10px;padding:14px;text-align:center;">
+        <div style="font-size:22px;margin-bottom:6px;">${chIcons[c.id]}</div>
+        <div style="font-size:12px;font-weight:600;color:${c.dot};margin-bottom:4px;">${c.label}</div>
+        <div style="font-size:16px;font-weight:600;">${fmt(gross)}</div>
+        <div style="font-size:11px;color:#888;margin-top:2px;">${trxs.length} transaksi${comm > 0 ? ' · komisi -' + fmt(comm) : ''}</div>
+        ${comm > 0 ? `<div style="font-size:12px;font-weight:600;color:#27ae60;margin-top:2px;">Bersih ${fmt(gross - comm)}</div>` : ''}
+        ${rateInput}
+      </div>`;
+  }).join('');
+
+  // Method breakdown (store transactions only)
   const methods = ['Tunai', 'QRIS', 'Kartu'];
   const icons = { Tunai: '💵', QRIS: '📱', Kartu: '💳' };
   document.getElementById('methodBreakdown').innerHTML = methods.map(m => {
@@ -738,6 +852,15 @@ function renderReport() {
         <div style="font-size:11px;color:#888;margin-top:2px;">${trxs.length} transaksi</div>
       </div>`;
   }).join('');
+}
+
+function setComm(ch, val) {
+  const v = Math.min(Math.max(parseFloat(val) || 0, 0), 100);
+  if (ch === 'GoFood') state.settings.commGoFood = v;
+  else state.settings.commGrabFood = v;
+  saveData();
+  renderReport();
+  renderCart();
 }
 
 function renderReportCharts(weekTrx) {
@@ -792,6 +915,7 @@ function renderReportCharts(weekTrx) {
 
 // ── INIT ──────────────────────────────────────────────────────────────────
 renderCatChips();
+renderChannelChips();
 renderProducts();
 renderCart();
 </script>

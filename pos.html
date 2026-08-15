@@ -331,6 +331,24 @@
       <div class="section-title">Metode Pembayaran — Toko (7 hari)</div>
       <div id="methodBreakdown" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;"></div>
     </div>
+
+    <div class="section" style="margin-top:16px;border-color:#f0dcdc;">
+      <div class="section-title">Reset Data</div>
+      <p style="font-size:13px;color:#555;line-height:1.6;margin-bottom:14px;">
+        Sudah selesai uji coba? Hapus data tes di sini supaya laporan mulai dari nol.
+      </p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="add-btn" style="border-color:#f0c4c4;color:#c0392b;" onclick="resetTransactions()">🗑 Hapus Semua Transaksi</button>
+        <button class="add-btn" style="border-color:#f0c4c4;color:#c0392b;" onclick="resetAll()">↺ Reset ke Awal (termasuk produk)</button>
+      </div>
+      <p style="font-size:12px;color:#888;line-height:1.6;margin-top:12px;">
+        <b>Hapus Semua Transaksi</b> — riwayat &amp; laporan dikosongkan, nomor transaksi kembali ke TRX-0001.
+        Produk, foto, dan stok tidak diubah.<br>
+        <b>Reset ke Awal</b> — transaksi dihapus <i>dan</i> daftar produk kembali ke contoh bawaan (foto ikut hilang, stok penuh lagi).
+        Pengaturan cloud &amp; persentase komisi tetap tersimpan.<br>
+        <span id="resetCloudNote" style="color:#e65100;display:none;">⚠️ Cloud aktif: data di Supabase <b>tidak</b> ikut terhapus. Hapus juga baris di Table Editor Supabase, kalau tidak data tes akan kembali saat menekan "Tarik Data".</span>
+      </p>
+    </div>
   </div>
 
   <div class="footer">MUGI POS · Aplikasi POS MUGI · Data tersimpan di browser ini</div>
@@ -468,7 +486,8 @@ function loadData() {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) return JSON.parse(saved);
   } catch(e) {}
-  return { products: defaultProducts, transactions: [], nextTrxNum: 1 };
+  // deep copy so sales never mutate defaultProducts (it is the source for "Reset ke Awal")
+  return { products: JSON.parse(JSON.stringify(defaultProducts)), transactions: [], nextTrxNum: 1 };
 }
 
 let quotaWarned = false;
@@ -940,6 +959,8 @@ function renderReport() {
   document.getElementById('repAvg').textContent = todayTrx.length ? fmt(todayTotal / todayTrx.length) : 'Rp 0';
   document.getElementById('repItems').textContent = todayItems;
 
+  document.getElementById('resetCloudNote').style.display = cloudEnabled() ? 'inline' : 'none';
+
   if (typeof Chart !== 'undefined') renderReportCharts(weekTrx);
 
   // Channel breakdown (older transactions without a channel count as Toko)
@@ -977,6 +998,43 @@ function renderReport() {
         <div style="font-size:11px;color:#888;margin-top:2px;">${trxs.length} transaksi</div>
       </div>`;
   }).join('');
+}
+
+// ── RESET ─────────────────────────────────────────────────────────────────
+function resetTransactions() {
+  if (state.transactions.length === 0) { alert('Belum ada transaksi untuk dihapus.'); return; }
+  if (!confirm('Hapus SEMUA ' + state.transactions.length + ' transaksi?\n\nRiwayat dan laporan jadi kosong. Produk, foto, dan stok tidak berubah.\nTindakan ini tidak bisa dibatalkan.')) return;
+  state.transactions = [];
+  state.nextTrxNum = 1;
+  state.unsynced = [];
+  saveData();
+  renderHistory();
+  renderReport();
+  updateCloudBadge();
+  alert('Selesai. Semua transaksi sudah dihapus.' + (cloudEnabled() ? '\n\nCatatan: data di Supabase belum terhapus — hapus juga lewat Table Editor di dashboard Supabase.' : ''));
+}
+
+function resetAll() {
+  if (!confirm('Reset ke awal?\n\n• Semua transaksi dihapus\n• Daftar produk kembali ke contoh bawaan (foto hilang, stok penuh)\n• Pengaturan cloud & komisi tetap tersimpan\n\nTindakan ini tidak bisa dibatalkan.')) return;
+  if (!confirm('Sekali lagi — yakin mau reset semuanya?')) return;
+  const keepSettings = state.settings;
+  state = {
+    products: JSON.parse(JSON.stringify(defaultProducts)),
+    transactions: [],
+    nextTrxNum: 1,
+    unsynced: [],
+    settings: keepSettings,
+  };
+  cart = [];
+  channel = 'Toko';
+  saveData();
+  renderProductTable();
+  renderChannelChips();
+  refreshPos();
+  renderHistory();
+  renderReport();
+  updateCloudBadge();
+  alert('Selesai. Aplikasi sudah kembali ke kondisi awal.' + (cloudEnabled() ? '\n\nCatatan: data di Supabase belum terhapus — hapus juga lewat Table Editor di dashboard Supabase.' : ''));
 }
 
 function setComm(ch, val) {

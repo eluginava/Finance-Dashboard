@@ -413,6 +413,7 @@
     <div class="modal-actions" style="margin-top:8px;">
       <button class="btn btn-cancel" onclick="closeCloud()">Tutup</button>
       <button class="btn btn-cancel" onclick="cloudPull()">⬇ Tarik Data</button>
+      <button class="btn btn-cancel" onclick="cloudPushProducts()">⬆ Kirim Produk</button>
       <button class="btn btn-primary" onclick="saveCloudSettings()">Simpan &amp; Tes</button>
     </div>
     <details style="margin-top:16px;">
@@ -444,6 +445,26 @@ create policy "pos_anon_select" on pos_transactions
 create policy "pos_anon_insert" on pos_transactions
   for insert to anon with check (true);
 create policy "pos_anon_delete" on pos_transactions
+  for delete to anon using (true);
+
+create table if not exists pos_products (
+  id bigint primary key,
+  name text,
+  cat text,
+  emoji text,
+  price numeric,
+  stock numeric,
+  img text,
+  updated_at timestamptz default now()
+);
+alter table pos_products enable row level security;
+create policy "pos_prod_select" on pos_products
+  for select to anon using (true);
+create policy "pos_prod_insert" on pos_products
+  for insert to anon with check (true);
+create policy "pos_prod_update" on pos_products
+  for update to anon using (true) with check (true);
+create policy "pos_prod_delete" on pos_products
   for delete to anon using (true);</textarea>
       <p style="font-size:11px;color:#999;line-height:1.6;margin-top:8px;">
         ⚠️ Anon key ini memberi akses baca/tulis tabel transaksi — jangan bagikan link aplikasi + key ke orang luar.
@@ -508,6 +529,7 @@ if (!state.settings) state.settings = { commGoFood: 20, commGrabFood: 30 };
 if (!state.settings.supabaseUrl) state.settings.supabaseUrl = '';
 if (!state.settings.supabaseKey) state.settings.supabaseKey = '';
 if (!state.unsynced) state.unsynced = [];   // trx uids waiting to reach the cloud
+if (!state.unsyncedProducts) state.unsyncedProducts = [];   // product ids waiting to reach the cloud
 let cart = [];          // { productId, qty }
 let activeCat = 'Semua';
 let payMethod = 'Tunai';
@@ -769,8 +791,9 @@ function confirmPayment() {
   // decrement stock
   cart.forEach(c => {
     const p = state.products.find(p => p.id === c.productId);
-    if (p) p.stock = Math.max(0, p.stock - c.qty);
+    if (p) { p.stock = Math.max(0, p.stock - c.qty); markProductDirty(p.id); }
   });
+  scheduleProductSync();
 
   state.unsynced.push(trx.uid);
   saveData();
@@ -831,11 +854,11 @@ function renderProductTable() {
         ${p.img ? `<button class="del-btn" onclick="removeImage(${i})" title="Hapus foto">✕</button>` : ''}
       </td>
       <td>
-        <input class="tbl-input" type="text" value="${esc(p.name)}" style="width:230px;" onchange="state.products[${i}].name=this.value;saveData();refreshPos();">
+        <input class="tbl-input" type="text" value="${esc(p.name)}" style="width:230px;" onchange="state.products[${i}].name=this.value;saveData();markProductDirty(state.products[${i}].id);scheduleProductSync();refreshPos();">
       </td>
-      <td><input class="tbl-input" type="text" value="${esc(p.cat)}" style="width:100px;" onchange="state.products[${i}].cat=this.value;saveData();refreshPos();"></td>
-      <td><input class="tbl-input" type="number" value="${p.price}" step="500" style="width:110px;" onchange="state.products[${i}].price=+this.value;saveData();refreshPos();"></td>
-      <td><input class="tbl-input" type="number" value="${p.stock}" style="width:80px;" onchange="state.products[${i}].stock=+this.value;saveData();refreshPos();"></td>
+      <td><input class="tbl-input" type="text" value="${esc(p.cat)}" style="width:100px;" onchange="state.products[${i}].cat=this.value;saveData();markProductDirty(state.products[${i}].id);scheduleProductSync();refreshPos();"></td>
+      <td><input class="tbl-input" type="number" value="${p.price}" step="500" style="width:110px;" onchange="state.products[${i}].price=+this.value;saveData();markProductDirty(state.products[${i}].id);scheduleProductSync();refreshPos();"></td>
+      <td><input class="tbl-input" type="number" value="${p.stock}" style="width:80px;" onchange="state.products[${i}].stock=+this.value;saveData();markProductDirty(state.products[${i}].id);scheduleProductSync();refreshPos();"></td>
       <td><button class="del-btn" onclick="removeProduct(${i})" title="Hapus">✕</button></td>
     `;
     tbody.appendChild(tr);
@@ -847,18 +870,24 @@ function addProduct() {
   const maxId = state.products.reduce((m, p) => Math.max(m, p.id), 0);
   state.products.push({ id: maxId + 1, name: 'Produk Baru', emoji: '📦', cat: 'Lainnya', price: 0, stock: 0 });
   saveData();
+  markProductDirty(maxId + 1);
+  scheduleProductSync();
   renderProductTable();
   refreshPos();
 }
 
-function removeProduct(i) {
+async function removeProduct(i) {
   if (!confirm('Hapus produk "' + state.products[i].name + '"?')) return;
   const id = state.products[i].id;
   state.products.splice(i, 1);
   cart = cart.filter(c => c.productId !== id);
+  state.unsyncedProducts = state.unsyncedProducts.filter(pid => pid !== id);
   saveData();
   renderProductTable();
   refreshPos();
+  if (cloudEnabled()) {
+    try { await sbFetch('/rest/v1/pos_products?id=eq.' + id, { method: 'DELETE' }); } catch (e) {}
+  }
 }
 
 function refreshPos() {
@@ -888,6 +917,8 @@ function uploadImage(i, input) {
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       state.products[i].img = canvas.toDataURL('image/jpeg', 0.78);
       saveData();
+      markProductDirty(state.products[i].id);
+      scheduleProductSync();
       renderProductTable();
       refreshPos();
     };
@@ -900,6 +931,8 @@ function uploadImage(i, input) {
 function removeImage(i) {
   delete state.products[i].img;
   saveData();
+  markProductDirty(state.products[i].id);
+  scheduleProductSync();
   renderProductTable();
   refreshPos();
 }
@@ -1014,8 +1047,9 @@ async function voidTransaction(i) {
   let restored = 0, missing = 0;
   trx.items.forEach(it => {
     const p = state.products.find(p => p.name === it.name);
-    if (p) { p.stock += it.qty; restored++; } else { missing++; }
+    if (p) { p.stock += it.qty; markProductDirty(p.id); restored++; } else { missing++; }
   });
+  scheduleProductSync();
 
   state.transactions.splice(i, 1);
   state.unsynced = state.unsynced.filter(u => u !== trx.uid);
@@ -1066,6 +1100,7 @@ function resetAll() {
     transactions: [],
     nextTrxNum: 1,
     unsynced: [],
+    unsyncedProducts: [],
     settings: keepSettings,
   };
   cart = [];
@@ -1188,6 +1223,50 @@ async function syncNow() {
   updateCloudBadge();
 }
 
+// ── PRODUCT SYNC ──────────────────────────────────────────────────────────
+function productToRow(p) {
+  return {
+    id: p.id, name: p.name, cat: p.cat, emoji: p.emoji || '📦',
+    price: p.price, stock: p.stock, img: p.img || null,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function markProductDirty(id) {
+  if (!state.unsyncedProducts.includes(id)) state.unsyncedProducts.push(id);
+}
+
+let productSyncTimer = null;
+function scheduleProductSync() {
+  clearTimeout(productSyncTimer);
+  productSyncTimer = setTimeout(syncProducts, 1200);   // debounce rapid edits
+  updateCloudBadge();
+}
+
+async function syncProducts() {
+  if (!cloudEnabled() || state.unsyncedProducts.length === 0) { updateCloudBadge(); return; }
+  const rows = state.products.filter(p => state.unsyncedProducts.includes(p.id)).map(productToRow);
+  if (rows.length === 0) { state.unsyncedProducts = []; saveData(); updateCloudBadge(); return; }
+  try {
+    const res = await sbFetch('/rest/v1/pos_products?on_conflict=id', {
+      method: 'POST',
+      headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify(rows),
+    });
+    if (res.ok) {
+      const sent = rows.map(r => r.id);
+      state.unsyncedProducts = state.unsyncedProducts.filter(id => !sent.includes(id));
+      saveData();
+    }
+  } catch (e) { /* offline — stays queued */ }
+  updateCloudBadge();
+}
+
+function queueAllProductsForSync() {
+  state.products.forEach(p => markProductDirty(p.id));
+  saveData();
+}
+
 function queueAllForSync() {
   state.transactions.forEach(t => {
     if (!t.uid) t.uid = new Date(t.time).getTime().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
@@ -1200,6 +1279,28 @@ async function cloudPull() {
   const status = document.getElementById('cloudStatus');
   if (!cloudEnabled()) { status.innerHTML = '<span style="color:#c0392b;">Isi URL dan key dulu, lalu Simpan &amp; Tes.</span>'; return; }
   status.textContent = 'Mengambil data…';
+
+  // products first, so pulled transactions line up with the right menu
+  let prodMsg = '';
+  try {
+    const pres = await sbFetch('/rest/v1/pos_products?select=*&order=id');
+    if (pres.ok) {
+      const prows = await pres.json();
+      let pAdded = 0, pUpdated = 0;
+      prows.forEach(r => {
+        const local = state.products.find(p => p.id === r.id);
+        const incoming = {
+          id: r.id, name: r.name, cat: r.cat, emoji: r.emoji || '📦',
+          price: +r.price, stock: +r.stock,
+        };
+        if (r.img) incoming.img = r.img;
+        if (local) { Object.assign(local, incoming); pUpdated++; }
+        else { state.products.push(incoming); pAdded++; }
+      });
+      if (prows.length) prodMsg = ' Produk: ' + pAdded + ' baru, ' + pUpdated + ' diperbarui.';
+    }
+  } catch (e) { /* products are optional — carry on to transactions */ }
+
   try {
     const res = await sbFetch('/rest/v1/pos_transactions?select=*&order=time.desc&limit=5000');
     if (!res.ok) throw new Error(res.status);
@@ -1219,11 +1320,23 @@ async function cloudPull() {
     });
     state.transactions.sort((a, b) => new Date(b.time) - new Date(a.time));
     saveData();
-    renderHistory(); renderReport();
-    status.innerHTML = '<span style="color:#27ae60;">✓ ' + added + ' transaksi baru diambil dari cloud (total ' + state.transactions.length + ').</span>';
+    renderHistory(); renderReport(); renderProductTable(); refreshPos();
+    status.innerHTML = '<span style="color:#27ae60;">✓ ' + added + ' transaksi baru diambil (total ' + state.transactions.length + ').' + prodMsg + '</span>';
   } catch (e) {
     status.innerHTML = '<span style="color:#c0392b;">Gagal mengambil data. Cek koneksi / URL / key.</span>';
   }
+}
+
+async function cloudPushProducts() {
+  const status = document.getElementById('cloudStatus');
+  if (!cloudEnabled()) { status.innerHTML = '<span style="color:#c0392b;">Isi URL dan key dulu, lalu Simpan &amp; Tes.</span>'; return; }
+  if (!confirm('Kirim ' + state.products.length + ' produk dari perangkat ini ke cloud?\n\nMenu di cloud akan ditimpa dengan menu di perangkat ini.')) return;
+  status.textContent = 'Mengirim produk…';
+  queueAllProductsForSync();
+  await syncProducts();
+  status.innerHTML = state.unsyncedProducts.length === 0
+    ? '<span style="color:#27ae60;">✓ ' + state.products.length + ' produk terkirim ke cloud.</span>'
+    : '<span style="color:#c0392b;">Sebagian gagal terkirim (' + state.unsyncedProducts.length + ' antre). Cek koneksi, lalu coba lagi.</span>';
 }
 
 function openCloud() {
@@ -1244,9 +1357,33 @@ async function saveCloudSettings() {
   try {
     const res = await sbFetch('/rest/v1/pos_transactions?select=uid&limit=1');
     if (res.ok) {
-      status.innerHTML = '<span style="color:#27ae60;">✓ Terhubung! Transaksi lama ikut diantre untuk sinkron.</span>';
+      // transactions are additive (unique id each), so they are always safe to upload
       queueAllForSync();
       syncNow();
+
+      // products would OVERWRITE the cloud menu, so only upload them when the
+      // cloud is still empty. Otherwise the user chooses: pull down, or push over.
+      let cloudCount = 0;
+      try {
+        const pr = await sbFetch('/rest/v1/pos_products?select=id');
+        if (pr.ok) cloudCount = (await pr.json()).length;
+      } catch (e) {}
+
+      if (cloudCount === 0) {
+        queueAllProductsForSync();
+        syncProducts();
+        status.innerHTML = '<span style="color:#27ae60;">✓ Terhubung! Cloud masih kosong, jadi produk &amp; transaksi di perangkat ini diunggah ke cloud.</span>';
+      } else {
+        // drop any product edits queued before connecting, so nothing silently
+        // overwrites the cloud menu; the user picks a direction explicitly below
+        clearTimeout(productSyncTimer);
+        state.unsyncedProducts = [];
+        saveData();
+        updateCloudBadge();
+        status.innerHTML = '<span style="color:#27ae60;">✓ Terhubung! Cloud sudah punya <b>' + cloudCount + ' produk</b>.</span>' +
+          '<br><span style="color:#555;">Perangkat/domain baru? Tekan <b>⬇ Tarik Data</b> untuk memakai menu dari cloud.<br>' +
+          'Kalau menu di perangkat ini yang paling benar, tekan <b>⬆ Kirim Produk</b> untuk menimpa yang di cloud.</span>';
+      }
     } else if (res.status === 404) {
       status.innerHTML = '<span style="color:#c0392b;">Terhubung, tapi tabel belum ada — jalankan SQL di bawah dulu di Supabase SQL Editor.</span>';
     } else {
@@ -1261,7 +1398,7 @@ async function saveCloudSettings() {
 function updateCloudBadge() {
   const b = document.getElementById('cloudBadge');
   if (!cloudEnabled()) { b.className = 'cloud-badge'; b.textContent = '☁️ off'; }
-  else if (state.unsynced.length > 0) { b.className = 'cloud-badge pending'; b.textContent = '☁️ ' + state.unsynced.length + ' antre'; }
+  else if (state.unsynced.length + state.unsyncedProducts.length > 0) { b.className = 'cloud-badge pending'; b.textContent = '☁️ ' + (state.unsynced.length + state.unsyncedProducts.length) + ' antre'; }
   else { b.className = 'cloud-badge on'; b.textContent = '☁️ sinkron'; }
 }
 
@@ -1293,7 +1430,7 @@ renderChannelChips();
 renderProducts();
 renderCart();
 updateCloudBadge();
-if (cloudEnabled()) syncNow();
+if (cloudEnabled()) { syncNow(); syncProducts(); }
 </script>
 </body>
 </html>

@@ -64,6 +64,17 @@
   .product-card { background: #fff; border: 1px solid #e5e5e0; border-radius: 10px; padding: 14px; cursor: pointer; transition: all 0.12s; user-select: none; }
   .product-card:hover { border-color: #999; transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
   .product-card.out { opacity: 0.45; cursor: not-allowed; }
+  /* Favourites: 3x3 shortcut grid */
+  .fav-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .fav-card { background: #fff; border: 1.5px solid #e5e5e0; border-radius: 10px; padding: 10px; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: all 0.12s; user-select: none; text-align: left; font-family: inherit; }
+  .fav-card:hover { border-color: #1a1a1a; transform: translateY(-1px); }
+  .fav-card:active { transform: scale(0.98); }
+  .fav-card.out { opacity: 0.4; cursor: not-allowed; }
+  .fav-thumb { width: 48px; height: 27px; border-radius: 5px; object-fit: cover; flex-shrink: 0; background: #f5f5f3; display: flex; align-items: center; justify-content: center; font-size: 17px; }
+  .fav-name { font-size: 12px; font-weight: 600; line-height: 1.25; }
+  .fav-price { font-size: 11px; color: #888; }
+  .fav-star { background: none; border: none; cursor: pointer; font-size: 15px; padding: 2px 4px; line-height: 1; }
+
   .product-thumb { width: 100%; aspect-ratio: 16 / 9; border-radius: 8px; object-fit: cover; margin-bottom: 8px; background: #f5f5f3; display: flex; align-items: center; justify-content: center; font-size: 30px; }
   .product-name { font-size: 13px; font-weight: 600; margin-bottom: 4px; line-height: 1.3; }
   .product-price { font-size: 13px; color: #555; }
@@ -200,10 +211,42 @@
     .header { flex-wrap: wrap; gap: 10px; }
   }
 
+  /* Thermal receipt printing — 58mm roll (VSC Kertas Thermal Struk 58x40mm).
+     Chrome has no 'auto' page height, so printReceipt() measures the rendered
+     receipt and injects the exact @page size before printing. This keeps the
+     paper feed to just what the receipt needs. */
+  @page { size: 58mm 120mm; margin: 0; }
+
   @media print {
-    body * { visibility: hidden; }
-    #receiptPrint, #receiptPrint * { visibility: visible; }
-    #receiptPrint { position: absolute; left: 0; top: 0; width: 100%; }
+    html, body { width: 58mm; margin: 0 !important; padding: 0 !important; background: #fff; }
+
+    /* Collapse the app completely — using display:none rather than visibility
+       so the hidden UI takes up no space and the roll stays a single struk. */
+    body > *:not(#receiptModal) { display: none !important; }
+    #receiptModal {
+      display: block !important; position: static !important; inset: auto !important;
+      background: none !important; padding: 0 !important; overflow: visible !important;
+    }
+    #receiptModal .modal {
+      max-width: none !important; width: auto !important; max-height: none !important;
+      padding: 0 !important; margin: 0 !important; border-radius: 0 !important;
+      box-shadow: none !important; overflow: visible !important;
+    }
+    #receiptModal h2, #receiptModal .modal-actions { display: none !important; }
+
+    #receiptPrint {
+      width: 54mm;                      /* 58mm roll minus ~2mm each side */
+      margin: 0; padding: 2mm 0 6mm 0;
+      border: none; background: #fff; color: #000;
+      font-family: 'Courier New', monospace;
+      font-size: 9pt; line-height: 1.35;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact;
+    }
+    #receiptPrint .r-line { border-top: 1px dashed #000; margin: 4px 0; }
+    #receiptPrint img { max-width: 34mm !important; max-height: 14mm !important; filter: grayscale(1) contrast(1.6); }
+    #receiptPrint .r-row { display: flex; justify-content: space-between; gap: 4px; }
+    #receiptPrint .r-row span:last-child { white-space: nowrap; }
+    #receiptPrint .r-small { font-size: 8pt; }
   }
 </style>
 </head>
@@ -241,6 +284,13 @@
         <div class="search-bar">
           <input type="text" id="searchInput" placeholder="🔍 Cari produk..." oninput="renderProducts()">
         </div>
+        <div id="favSection" style="margin-bottom:18px;">
+          <div style="font-size:12px;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;display:flex;align-items:center;gap:8px;">
+            ⭐ Menu Favorit
+            <span style="text-transform:none;letter-spacing:0;color:#bbb;">— sekali klik langsung masuk keranjang</span>
+          </div>
+          <div class="fav-grid" id="favGrid"></div>
+        </div>
         <div class="cat-chips" id="catChips"></div>
         <div class="product-grid" id="productGrid"></div>
       </div>
@@ -255,12 +305,19 @@
         <div class="cart-summary">
           <div class="sum-row"><span>Subtotal</span><span id="cartSubtotal">Rp 0</span></div>
           <div class="sum-row"><span>Diskon (Rp)</span><input type="number" id="discountInput" value="0" min="0" oninput="renderCart()"></div>
-          <div class="sum-row"><span>Pajak PB1 (10%)</span>
+          <div class="sum-row" id="voucherRow" style="gap:6px;">
+            <span>Voucher</span>
+            <span style="display:flex;gap:6px;align-items:center;">
+              <input type="text" id="voucherInput" placeholder="KODE" style="width:88px;text-transform:uppercase;" onkeydown="if(event.key==='Enter')applyVoucher()">
+              <button class="qty-btn" style="width:auto;padding:0 8px;" onclick="applyVoucher()">OK</button>
+            </span>
+          </div>
+          <div class="sum-row muted" id="voucherApplied" style="display:none;"><span id="voucherLabel"></span><span id="voucherVal"></span></div>
+          <div class="sum-row" id="taxRow">
+            <span id="taxLabel">Pajak PB1</span>
             <span><input type="checkbox" id="taxCheck" onchange="renderCart()" style="accent-color:#27ae60;vertical-align:middle;margin-right:6px;"><span id="cartTax">Rp 0</span></span>
           </div>
           <div class="sum-row total"><span>Total</span><span id="cartTotal">Rp 0</span></div>
-          <div class="sum-row muted" id="commRow" style="display:none;"><span id="commLabel"></span><span id="commVal"></span></div>
-          <div class="sum-row muted" id="netRow" style="display:none;"><span>Diterima bersih</span><span id="netVal"></span></div>
         </div>
         <button class="pay-btn" id="payBtn" onclick="openPayment()" disabled>Bayar</button>
       </div>
@@ -278,6 +335,7 @@
         <table>
           <thead>
             <tr>
+              <th>⭐</th>
               <th>Foto</th>
               <th>Produk</th>
               <th>Kategori</th>
@@ -309,6 +367,10 @@
 
   <!-- ═══ LAPORAN ═══ -->
   <div class="page" id="page-laporan">
+    <div id="branchFilterBar" style="display:none;margin-bottom:14px;align-items:center;gap:10px;font-size:13px;">
+      <span style="color:#888;">🏬 Cabang:</span>
+      <select id="branchFilter" class="tbl-input" style="min-width:200px;" onchange="renderReport()"></select>
+    </div>
     <div class="metrics">
       <div class="metric-card success">
         <div class="label">Penjualan Hari Ini</div>
@@ -350,7 +412,6 @@
     <div class="section" style="margin-top:16px;">
       <div class="section-title">
         Penjualan per Kanal (7 hari)
-        <span class="badge">% komisi bisa diubah</span>
         <button class="add-btn" style="margin-left:auto;font-size:12px;padding:5px 12px;" onclick="exportCSV()">⬇ Export Laporan CSV</button>
       </div>
       <div id="channelBreakdown" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;"></div>
@@ -409,6 +470,87 @@
       </p>
     </div>
 
+    <div class="section mgr-only">
+      <div class="section-title">Cabang &amp; Struk</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div>
+          <label style="font-size:12px;color:#888;display:block;margin-bottom:6px;">Nama Cabang</label>
+          <input class="tbl-input" type="text" id="branchNameInput" style="width:100%;" placeholder="mis. Cabang Kelapa Gading" onchange="saveBranch()">
+        </div>
+        <div>
+          <label style="font-size:12px;color:#888;display:block;margin-bottom:6px;">No. Telepon</label>
+          <input class="tbl-input" type="text" id="branchPhoneInput" style="width:100%;" placeholder="mis. 021-1234567" onchange="saveBranch()">
+        </div>
+        <div>
+          <label style="font-size:12px;color:#888;display:block;margin-bottom:6px;">Alamat</label>
+          <input class="tbl-input" type="text" id="branchAddressInput" style="width:100%;" placeholder="mis. Jl. Boulevard No. 5" onchange="saveBranch()">
+        </div>
+        <div>
+          <label style="font-size:12px;color:#888;display:block;margin-bottom:6px;">Catatan bawah struk</label>
+          <input class="tbl-input" type="text" id="receiptNoteInput" style="width:100%;" placeholder="Terima kasih! 🙏" onchange="saveBranch()">
+        </div>
+        <div>
+          <label style="font-size:12px;color:#888;display:block;margin-bottom:6px;">Pajak PB1 (%)</label>
+          <input class="tbl-input" type="number" id="taxPercentInput" style="width:90px;" min="0" max="100" step="0.5" onchange="saveBranch()">
+        </div>
+      </div>
+      <p style="font-size:12px;color:#888;line-height:1.6;margin-top:12px;">
+        Nama cabang ikut tercetak di struk dan tersimpan di tiap transaksi, jadi kalau ada komplain ketahuan dari cabang mana.
+        Di Laporan ada filter cabang supaya angka tiap toko tidak tercampur.
+        PB1 otomatis aktif untuk pembelian <b>Toko</b>, dan tidak dikenakan untuk GoFood/GrabFood.
+      </p>
+      <div style="margin-top:12px;">
+        <button class="add-btn" onclick="previewReceipt()">🧾 Lihat contoh struk</button>
+      </div>
+    </div>
+
+    <div class="section mgr-only">
+      <div class="section-title">
+        Voucher Promo
+        <span class="badge" id="voucherCount">0 kode</span>
+      </div>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead><tr><th>Kode</th><th>Jenis</th><th>Nilai</th><th>Status</th><th></th></tr></thead>
+          <tbody id="voucherTableBody"></tbody>
+        </table>
+      </div>
+      <div style="margin-top:12px;">
+        <button class="add-btn" onclick="addVoucher()">+ Tambah Voucher</button>
+      </div>
+      <p style="font-size:12px;color:#888;line-height:1.6;margin-top:10px;">
+        Kasir tinggal ketik kodenya di keranjang. "Persen" memotong sekian persen dari subtotal, "Rupiah" memotong nominal tetap.
+      </p>
+    </div>
+
+    <div class="section mgr-only">
+      <div class="section-title">
+        Pelanggan / Member
+        <span class="badge" id="customerCount">0 pelanggan</span>
+      </div>
+      <div id="customerList" style="overflow-x:auto;"></div>
+      <p style="font-size:12px;color:#888;line-height:1.6;margin-top:10px;">
+        Nomor HP yang diisi saat pembayaran otomatis tersimpan di sini beserta jumlah kunjungan dan total belanja.
+      </p>
+    </div>
+
+    <div class="section">
+      <div class="section-title">
+        Hak Akses
+        <span class="badge" id="roleBadge">—</span>
+      </div>
+      <p style="font-size:13px;color:#555;line-height:1.6;margin-bottom:12px;">
+        <b>Kasir</b> hanya bisa melayani penjualan, melihat &amp; membetulkan orderan.
+        <b>Manajemen</b> (pakai PIN) bisa ubah harga, nama menu, tambah produk, atur cabang, voucher, dan reset data.
+      </p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="add-btn" id="mgrUnlockBtn" onclick="unlockManager()">🔓 Masuk Mode Manajemen</button>
+        <button class="add-btn" id="mgrLockBtn" onclick="lockManager()" style="display:none;">🔒 Kunci Lagi (mode kasir)</button>
+        <button class="add-btn" onclick="setManagerPin()">Atur / Ganti PIN</button>
+      </div>
+      <p style="font-size:12px;color:#e65100;line-height:1.6;margin-top:10px;" id="pinWarn"></p>
+    </div>
+
     <div class="section">
       <div class="section-title">Pasang di HP</div>
       <p style="font-size:13px;color:#555;line-height:1.6;margin-bottom:12px;">
@@ -437,7 +579,7 @@
         <b>Hapus Semua Transaksi</b> — riwayat &amp; laporan dikosongkan, nomor transaksi kembali ke TRX-0001.
         Produk, foto, dan stok tidak diubah.<br>
         <b>Reset ke Awal</b> — transaksi dihapus <i>dan</i> daftar produk kembali ke contoh bawaan (foto ikut hilang, stok penuh lagi).
-        Logo, nama toko, kasir, pengaturan cloud &amp; komisi tetap tersimpan.<br>
+        Logo, nama toko, cabang, kasir, voucher &amp; pengaturan cloud tetap tersimpan.<br>
         <span id="resetCloudNote" style="color:#e65100;display:none;">⚠️ Cloud aktif: data di Supabase <b>tidak</b> ikut terhapus. Hapus juga baris di Table Editor Supabase, kalau tidak data tes akan kembali saat menekan "Tarik Data".</span>
       </p>
     </div>
@@ -471,8 +613,19 @@
     <div id="onlineSection" style="display:none;">
       <div id="onlineNote" style="background:#f0fff2;border:1px solid #cdeccf;border-radius:10px;padding:12px;font-size:13px;color:#00880f;line-height:1.6;margin-bottom:14px;"></div>
       <label>No. pesanan (opsional)</label>
-      <input type="text" id="refInput" placeholder="mis. GF-1234 / GM-5678" style="width:100%;border:1px solid #e5e5e0;border-radius:8px;padding:11px 14px;font-size:14px;background:#fafafa;outline:none;font-family:inherit;">
+      <input class="txt" type="text" id="refInput" placeholder="mis. GF-1234 / GM-5678">
     </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:4px;">
+      <div>
+        <label>Nama pemesan (opsional)</label>
+        <input class="txt" type="text" id="custName" placeholder="mis. Bu Sri">
+      </div>
+      <div>
+        <label>No. HP / member (opsional)</label>
+        <input class="txt" type="tel" id="custPhone" placeholder="08xxxxxxxxxx" oninput="lookupCustomer()">
+      </div>
+    </div>
+    <div id="custInfo" style="font-size:12px;color:#2e7d32;margin-bottom:10px;min-height:16px;"></div>
     <div id="cashSection">
       <label>Uang diterima (Rp)</label>
       <input type="number" id="cashInput" placeholder="0" oninput="updateChange()">
@@ -542,6 +695,10 @@
   method text,
   ref text,
   cashier text,
+  branch text,
+  cust_name text,
+  cust_phone text,
+  voucher text,
   subtotal numeric,
   discount numeric,
   tax numeric,
@@ -566,6 +723,7 @@ create table if not exists pos_products (
   price numeric,
   stock numeric,
   img text,
+  fav boolean,
   updated_at timestamptz default now()
 );
 alter table pos_products enable row level security;
@@ -579,7 +737,12 @@ create policy "pos_prod_delete" on pos_products
   for delete to anon using (true);
 
 -- kalau tabel transaksi sudah dibuat sebelum ada fitur kasir, jalankan ini juga:
-alter table pos_transactions add column if not exists cashier text;</textarea>
+alter table pos_transactions add column if not exists cashier text;
+alter table pos_transactions add column if not exists branch text;
+alter table pos_transactions add column if not exists cust_name text;
+alter table pos_transactions add column if not exists cust_phone text;
+alter table pos_transactions add column if not exists voucher text;
+alter table pos_products add column if not exists fav boolean;</textarea>
       <p style="font-size:11px;color:#999;line-height:1.6;margin-top:8px;">
         ⚠️ Anon key ini memberi akses baca/tulis tabel transaksi — jangan bagikan link aplikasi + key ke orang luar.
       </p>
@@ -593,7 +756,7 @@ alter table pos_transactions add column if not exists cashier text;</textarea>
     <h2>✅ Transaksi Berhasil</h2>
     <div class="receipt" id="receiptPrint"></div>
     <div class="modal-actions">
-      <button class="btn btn-cancel" onclick="window.print()">🖨 Cetak</button>
+      <button class="btn btn-cancel" onclick="printReceipt()">🖨 Cetak</button>
       <button class="btn btn-primary" onclick="closeReceipt()">Transaksi Baru</button>
     </div>
   </div>
@@ -639,7 +802,15 @@ function saveData() {
 }
 
 let state = loadData();
-if (!state.settings) state.settings = { commGoFood: 20, commGrabFood: 30 };
+if (!state.settings) state.settings = {};
+if (state.settings.taxPercent === undefined) state.settings.taxPercent = 10;   // PB1
+if (!state.settings.branchName) state.settings.branchName = '';
+if (!state.settings.branchPhone) state.settings.branchPhone = '';
+if (!state.settings.branchAddress) state.settings.branchAddress = '';
+if (!state.settings.receiptNote) state.settings.receiptNote = 'Terima kasih! 🙏';
+if (state.settings.managerPin === undefined) state.settings.managerPin = '';    // '' = no lock yet
+if (!state.vouchers) state.vouchers = [];
+if (!state.customers) state.customers = {};   // phone -> { name, visits, spent, lastVisit }
 if (!state.settings.supabaseUrl) state.settings.supabaseUrl = '';
 if (!state.settings.supabaseKey) state.settings.supabaseKey = '';
 if (!state.unsynced) state.unsynced = [];   // trx uids waiting to reach the cloud
@@ -660,9 +831,7 @@ const CHANNELS = [
   { id: 'GrabFood', label: 'GrabFood', cls: 'grabfood', dot: '#00b14f' },
 ];
 
-function channelRate(ch) {
-  return ch === 'GoFood' ? state.settings.commGoFood : ch === 'GrabFood' ? state.settings.commGrabFood : 0;
-}
+function isOnlineChannel(ch) { return ch === 'GoFood' || ch === 'GrabFood'; }
 
 // ── UTILS ─────────────────────────────────────────────────────────────────
 function fmt(n) { return 'Rp ' + Math.round(n).toLocaleString('id-ID'); }
@@ -721,6 +890,162 @@ function saveStoreName(v) {
   state.settings.storeName = (v || '').trim() || 'MUGI POS';
   saveData();
   renderBranding();
+}
+
+// ── BRANCH / RECEIPT SETTINGS ─────────────────────────────────────────────
+function saveBranch() {
+  const g = id => document.getElementById(id);
+  state.settings.branchName = g('branchNameInput').value.trim();
+  state.settings.branchPhone = g('branchPhoneInput').value.trim();
+  state.settings.branchAddress = g('branchAddressInput').value.trim();
+  state.settings.receiptNote = g('receiptNoteInput').value.trim() || 'Terima kasih! 🙏';
+  const tp = parseFloat(g('taxPercentInput').value);
+  state.settings.taxPercent = isNaN(tp) ? 0 : Math.min(Math.max(tp, 0), 100);
+  saveData();
+  applyChannelTaxRule();
+  renderCart();
+  renderBranchInputs();
+}
+
+function renderBranchInputs() {
+  const g = id => document.getElementById(id);
+  if (!g('branchNameInput')) return;
+  g('branchNameInput').value = state.settings.branchName;
+  g('branchPhoneInput').value = state.settings.branchPhone;
+  g('branchAddressInput').value = state.settings.branchAddress;
+  g('receiptNoteInput').value = state.settings.receiptNote;
+  g('taxPercentInput').value = state.settings.taxPercent;
+}
+
+// Shows a sample receipt so the layout can be checked (and printed) without a sale
+function previewReceipt() {
+  showReceipt({
+    id: 'CONTOH-0001', time: new Date().toISOString(),
+    items: [{ name: 'Kopi Susu Gula Aren', price: 22000, qty: 2 }, { name: 'Kentang Goreng', price: 18000, qty: 1 }],
+    subtotal: 62000, discount: 0, voucherCut: 0, voucher: '',
+    tax: Math.round(62000 * state.settings.taxPercent / 100),
+    total: 62000 + Math.round(62000 * state.settings.taxPercent / 100),
+    method: 'Tunai', cash: 100000,
+    change: 100000 - (62000 + Math.round(62000 * state.settings.taxPercent / 100)),
+    channel: 'Toko', ref: '', cashier: state.cashier || 'Kasir',
+    branch: state.settings.branchName, custName: 'Bu Sri', custPhone: '',
+  });
+}
+
+// ── VOUCHERS ──────────────────────────────────────────────────────────────
+function renderVouchers() {
+  const tb = document.getElementById('voucherTableBody');
+  if (!tb) return;
+  tb.innerHTML = state.vouchers.map((v, i) => `
+    <tr>
+      <td><input class="tbl-input" type="text" value="${esc(v.code)}" style="width:110px;text-transform:uppercase;" onchange="editVoucher(${i},'code',this.value)"></td>
+      <td>
+        <select class="tbl-input" style="width:100px;" onchange="editVoucher(${i},'type',this.value)">
+          <option value="percent" ${v.type==='percent'?'selected':''}>Persen</option>
+          <option value="amount" ${v.type==='amount'?'selected':''}>Rupiah</option>
+        </select>
+      </td>
+      <td><input class="tbl-input" type="number" value="${v.value}" style="width:100px;" onchange="editVoucher(${i},'value',this.value)"> ${v.type==='percent'?'%':'Rp'}</td>
+      <td>
+        <select class="tbl-input" style="width:100px;" onchange="editVoucher(${i},'active',this.value==='1')">
+          <option value="1" ${v.active!==false?'selected':''}>Aktif</option>
+          <option value="0" ${v.active===false?'selected':''}>Nonaktif</option>
+        </select>
+      </td>
+      <td><button class="del-btn" onclick="removeVoucher(${i})" title="Hapus">✕</button></td>
+    </tr>`).join('');
+  document.getElementById('voucherCount').textContent = state.vouchers.length + ' kode';
+}
+
+function addVoucher() {
+  state.vouchers.push({ code: 'PROMO' + (state.vouchers.length + 1), type: 'percent', value: 10, active: true });
+  saveData(); renderVouchers();
+}
+
+function editVoucher(i, field, val) {
+  if (field === 'value') val = Math.max(0, parseFloat(val) || 0);
+  if (field === 'code') val = String(val).trim().toUpperCase();
+  state.vouchers[i][field] = val;
+  saveData(); renderVouchers();
+}
+
+function removeVoucher(i) {
+  if (!confirm('Hapus voucher "' + state.vouchers[i].code + '"?')) return;
+  state.vouchers.splice(i, 1);
+  saveData(); renderVouchers();
+}
+
+// ── CUSTOMERS / MEMBERSHIP ────────────────────────────────────────────────
+function renderCustomers() {
+  const wrap = document.getElementById('customerList');
+  if (!wrap) return;
+  const rows = Object.entries(state.customers).sort((a, b) => b[1].spent - a[1].spent);
+  document.getElementById('customerCount').textContent = rows.length + ' pelanggan';
+  wrap.innerHTML = rows.length
+    ? '<table><thead><tr><th>Nama</th><th>No. HP</th><th>Kunjungan</th><th>Total Belanja</th><th>Terakhir</th></tr></thead><tbody>' +
+      rows.map(([phone, c]) => `<tr>
+        <td style="font-weight:500;">${esc(c.name || '-')}</td>
+        <td>${esc(phone)}</td>
+        <td>${c.visits}x</td>
+        <td style="font-weight:600;">${fmt(c.spent)}</td>
+        <td style="color:#888;">${c.lastVisit ? new Date(c.lastVisit).toLocaleDateString('id-ID') : '-'}</td>
+      </tr>`).join('') + '</tbody></table>'
+    : '<div style="font-size:13px;color:#bbb;">Belum ada pelanggan tersimpan.</div>';
+}
+
+// ── ROLES: KASIR vs MANAJEMEN ─────────────────────────────────────────────
+let managerUnlocked = false;
+
+function managerMode() {
+  return !state.settings.managerPin || managerUnlocked;   // no PIN set = everything open
+}
+
+function applyRoleVisibility() {
+  const open = managerMode();
+  document.querySelectorAll('.mgr-only').forEach(el => { el.style.display = open ? '' : 'none'; });
+  const produkTab = document.querySelector('.tab-btn[data-page="produk"]');
+  if (produkTab) produkTab.style.display = open ? '' : 'none';
+  if (!open && document.getElementById('page-produk').classList.contains('active')) switchPage('kasir');
+
+  const badge = document.getElementById('roleBadge');
+  if (badge) badge.textContent = open ? 'Manajemen' : 'Kasir';
+  const ub = document.getElementById('mgrUnlockBtn'), lb = document.getElementById('mgrLockBtn');
+  if (ub) ub.style.display = open ? 'none' : '';
+  if (lb) lb.style.display = open && state.settings.managerPin ? '' : 'none';
+  const warn = document.getElementById('pinWarn');
+  if (warn) warn.textContent = state.settings.managerPin
+    ? '' : '⚠️ PIN belum diatur — semua orang masih bisa mengubah harga & menu. Tekan "Atur / Ganti PIN".';
+}
+
+function unlockManager() {
+  if (!state.settings.managerPin) { alert('PIN belum diatur, semua menu masih terbuka. Tekan "Atur / Ganti PIN" untuk mengunci.'); return; }
+  const pin = prompt('Masukkan PIN manajemen:');
+  if (pin === null) return;
+  if (pin !== state.settings.managerPin) { alert('PIN salah.'); return; }
+  managerUnlocked = true;
+  applyRoleVisibility();
+  renderBranchInputs(); renderVouchers(); renderCustomers();
+}
+
+function lockManager() {
+  managerUnlocked = false;
+  applyRoleVisibility();
+}
+
+function setManagerPin() {
+  if (state.settings.managerPin && !managerUnlocked) {
+    const cur = prompt('Masukkan PIN lama:');
+    if (cur !== state.settings.managerPin) { alert('PIN salah.'); return; }
+  }
+  const pin = prompt('PIN manajemen baru (4-6 angka). Kosongkan untuk membuka kunci semua menu:');
+  if (pin === null) return;
+  const clean = pin.trim();
+  if (clean && !/^\d{4,6}$/.test(clean)) { alert('PIN harus 4-6 angka.'); return; }
+  state.settings.managerPin = clean;
+  managerUnlocked = true;
+  saveData();
+  applyRoleVisibility();
+  alert(clean ? 'PIN tersimpan. Kasir sekarang tidak bisa mengubah harga/menu tanpa PIN.' : 'Kunci dilepas — semua menu terbuka.');
 }
 
 // ── CASHIER / SHIFT ───────────────────────────────────────────────────────
@@ -797,7 +1122,7 @@ function switchPage(name) {
   document.getElementById('page-' + name).classList.add('active');
   const btn = document.querySelector('.tab-btn[data-page="' + name + '"]');
   if (btn) btn.classList.add('active');          // 'profil' opens from the avatar, not a tab
-  if (name === 'profil') { renderBranding(); renderCashier(); }
+  if (name === 'profil') { renderBranding(); renderCashier(); renderBranchInputs(); renderVouchers(); renderCustomers(); applyRoleVisibility(); }
   if (name === 'produk') renderProductTable();
   if (name === 'riwayat') renderHistory();
   if (name === 'laporan') renderReport();
@@ -818,6 +1143,57 @@ function renderCatChips() {
     btn.onclick = () => { activeCat = cat; renderCatChips(); renderProducts(); };
     wrap.appendChild(btn);
   });
+}
+
+// Top 9 shortcuts: products starred in Produk, topped up with the best
+// sellers of the last 30 days so the grid is useful before anything is pinned.
+function favouriteProducts() {
+  const pinned = state.products.filter(p => p.fav);
+  if (pinned.length >= 9) return pinned.slice(0, 9);
+
+  const since = new Date(); since.setDate(since.getDate() - 30);
+  const sold = {};
+  state.transactions.forEach(t => {
+    if (new Date(t.time) < since) return;
+    t.items.forEach(it => { sold[it.name] = (sold[it.name] || 0) + it.qty; });
+  });
+  const rest = state.products
+    .filter(p => !p.fav)
+    .sort((a, b) => (sold[b.name] || 0) - (sold[a.name] || 0));
+  return pinned.concat(rest).slice(0, 9);
+}
+
+function renderFavourites() {
+  const grid = document.getElementById('favGrid');
+  const favs = favouriteProducts();
+  document.getElementById('favSection').style.display = favs.length ? '' : 'none';
+  grid.innerHTML = '';
+  favs.forEach(p => {
+    const inCart = cart.find(c => c.productId === p.id);
+    const left = p.stock - (inCart ? inCart.qty : 0);
+    const card = document.createElement('button');
+    card.className = 'fav-card' + (left <= 0 ? ' out' : '');
+    card.innerHTML = `
+      ${p.img ? `<img class="fav-thumb" src="${p.img}" alt="">` : `<div class="fav-thumb">${p.emoji || '📦'}</div>`}
+      <div style="min-width:0;">
+        <div class="fav-name">${esc(p.name)}</div>
+        <div class="fav-price">${fmt(p.price)}${left <= 0 ? ' · habis' : ''}</div>
+      </div>`;
+    card.onclick = () => addToCart(p.id);
+    grid.appendChild(card);
+  });
+}
+
+function toggleFav(i) {
+  const p = state.products[i];
+  const pinnedCount = state.products.filter(x => x.fav).length;
+  if (!p.fav && pinnedCount >= 9) { alert('Maksimal 9 menu favorit. Lepas salah satu bintang dulu.'); return; }
+  p.fav = !p.fav;
+  saveData();
+  markProductDirty(p.id);
+  scheduleProductSync();
+  renderProductTable();
+  renderFavourites();
 }
 
 function renderProducts() {
@@ -858,6 +1234,7 @@ function renderChannelChips() {
 function selectChannel(c) {
   channel = c;
   renderChannelChips();
+  applyChannelTaxRule();
   renderCart();
 }
 
@@ -869,7 +1246,7 @@ function addToCart(id) {
   if (inCartQty >= p.stock) return;
   if (item) item.qty++;
   else cart.push({ productId: id, qty: 1 });
-  renderCart(); renderProducts();
+  renderCart(); renderProducts(); renderFavourites();
 }
 
 function changeQty(id, delta) {
@@ -879,14 +1256,32 @@ function changeQty(id, delta) {
   item.qty += delta;
   if (item.qty > p.stock) item.qty = p.stock;
   if (item.qty <= 0) cart = cart.filter(c => c.productId !== id);
-  renderCart(); renderProducts();
+  renderCart(); renderProducts(); renderFavourites();
 }
 
 function clearCart() {
   cart = [];
+  activeVoucher = null;
   document.getElementById('discountInput').value = 0;
-  renderCart(); renderProducts();
+  document.getElementById('voucherInput').value = '';
+  applyChannelTaxRule();
+  renderCart(); renderProducts(); renderFavourites();
 }
+
+// PB1 is charged on in-store sales only. It is ticked automatically so staff
+// cannot forget it, and forced off for GoFood/GrabFood where the platform
+// handles tax itself.
+function applyChannelTaxRule() {
+  const box = document.getElementById('taxCheck');
+  const online = isOnlineChannel(channel);
+  box.checked = !online;
+  box.disabled = online;
+  document.getElementById('taxRow').style.opacity = online ? 0.45 : 1;
+  document.getElementById('taxLabel').textContent =
+    'Pajak PB1 (' + state.settings.taxPercent + '%)' + (online ? ' — tidak berlaku' : '');
+}
+
+let activeVoucher = null;   // { code, type: 'percent'|'amount', value }
 
 function cartTotals() {
   const subtotal = cart.reduce((s, c) => {
@@ -895,9 +1290,29 @@ function cartTotals() {
   }, 0);
   let discount = parseFloat(document.getElementById('discountInput').value) || 0;
   discount = Math.min(Math.max(discount, 0), subtotal);
-  const taxable = subtotal - discount;
-  const tax = document.getElementById('taxCheck').checked ? Math.round(taxable * 0.10) : 0;
-  return { subtotal, discount, tax, total: taxable + tax };
+
+  let voucherCut = 0;
+  if (activeVoucher) {
+    voucherCut = activeVoucher.type === 'percent'
+      ? Math.round((subtotal - discount) * activeVoucher.value / 100)
+      : activeVoucher.value;
+    voucherCut = Math.min(Math.max(voucherCut, 0), subtotal - discount);
+  }
+
+  const taxable = subtotal - discount - voucherCut;
+  const tax = document.getElementById('taxCheck').checked
+    ? Math.round(taxable * state.settings.taxPercent / 100) : 0;
+  return { subtotal, discount, voucherCut, tax, total: taxable + tax };
+}
+
+function applyVoucher() {
+  const input = document.getElementById('voucherInput');
+  const code = input.value.trim().toUpperCase();
+  if (!code) { activeVoucher = null; renderCart(); return; }
+  const v = state.vouchers.find(v => v.code.toUpperCase() === code && v.active !== false);
+  if (!v) { alert('Kode voucher "' + code + '" tidak ditemukan atau sudah nonaktif.'); input.value = ''; activeVoucher = null; renderCart(); return; }
+  activeVoucher = { code: v.code, type: v.type, value: v.value };
+  renderCart();
 }
 
 function renderCart() {
@@ -923,17 +1338,15 @@ function renderCart() {
   document.getElementById('cartTax').textContent = fmt(t.tax);
   document.getElementById('cartTotal').textContent = fmt(t.total);
 
-  const online = channel !== 'Toko';
-  document.getElementById('commRow').style.display = online ? 'flex' : 'none';
-  document.getElementById('netRow').style.display = online ? 'flex' : 'none';
-  if (online) {
-    const rate = channelRate(channel);
-    const comm = Math.round(t.total * rate / 100);
-    document.getElementById('commLabel').textContent = 'Komisi ' + channel + ' (' + rate + '%)';
-    document.getElementById('commVal').textContent = '-' + fmt(comm);
-    document.getElementById('netVal').textContent = fmt(t.total - comm);
-  }
+  const vRow = document.getElementById('voucherApplied');
+  if (activeVoucher && t.voucherCut > 0) {
+    vRow.style.display = 'flex';
+    document.getElementById('voucherLabel').textContent = 'Voucher ' + activeVoucher.code +
+      (activeVoucher.type === 'percent' ? ' (' + activeVoucher.value + '%)' : '');
+    document.getElementById('voucherVal').textContent = '-' + fmt(t.voucherCut);
+  } else vRow.style.display = 'none';
 
+  const online = isOnlineChannel(channel);
   const payBtn = document.getElementById('payBtn');
   payBtn.disabled = cart.length === 0;
   payBtn.textContent = online ? 'Selesaikan Pesanan ' + channel : 'Bayar';
@@ -945,15 +1358,16 @@ function openPayment() {
   if (!state.cashier) { alert('Pilih kasir yang bertugas dulu sebelum menerima pembayaran.'); openShift(true); return; }
   const t = cartTotals();
   document.getElementById('payTotal').textContent = fmt(t.total);
-  const online = channel !== 'Toko';
+  const online = isOnlineChannel(channel);
   document.getElementById('methodSection').style.display = online ? 'none' : 'block';
   document.getElementById('onlineSection').style.display = online ? 'block' : 'none';
+  document.getElementById('custName').value = '';
+  document.getElementById('custPhone').value = '';
+  document.getElementById('custInfo').textContent = '';
   if (online) {
-    const rate = channelRate(channel);
-    const comm = Math.round(t.total * rate / 100);
     document.getElementById('onlineNote').innerHTML =
-      'Pesanan <b>' + channel + '</b> — pembayaran diterima via aplikasi.<br>' +
-      'Komisi ' + rate + '%: −' + fmt(comm) + ' · Bersih diterima: <b>' + fmt(t.total - comm) + '</b>';
+      'Pesanan <b>' + channel + '</b> — pembayaran sudah diterima lewat aplikasi ' + channel + '.<br>' +
+      '<span style="color:#555;">Dicatat di sini sebagai cadangan orderan. Struk untuk pelanggan tetap dicetak dari aplikasi ' + channel + '.</span>';
     document.getElementById('refInput').value = '';
     document.getElementById('cashSection').style.display = 'none';
     document.getElementById('confirmPayBtn').disabled = false;
@@ -993,7 +1407,7 @@ function renderCashQuick(total) {
 function updateChange() {
   const t = cartTotals();
   const btn = document.getElementById('confirmPayBtn');
-  if (channel !== 'Toko' || payMethod !== 'Tunai') { btn.disabled = false; return; }
+  if (isOnlineChannel(channel) || payMethod !== 'Tunai') { btn.disabled = false; return; }
   const cash = parseFloat(document.getElementById('cashInput').value) || 0;
   const change = cash - t.total;
   const el = document.getElementById('changeVal');
@@ -1002,14 +1416,25 @@ function updateChange() {
   btn.disabled = change < 0;
 }
 
+function lookupCustomer() {
+  const phone = document.getElementById('custPhone').value.trim();
+  const info = document.getElementById('custInfo');
+  const c = state.customers[phone];
+  if (c) {
+    info.textContent = '⭐ Member: ' + (c.name || phone) + ' · ' + c.visits + 'x belanja · total ' + fmt(c.spent);
+    const nameField = document.getElementById('custName');
+    if (c.name && !nameField.value) nameField.value = c.name;
+  } else info.textContent = '';
+}
+
 function confirmPayment() {
   const t = cartTotals();
-  const online = channel !== 'Toko';
+  const online = isOnlineChannel(channel);
   const cash = (!online && payMethod === 'Tunai') ? (parseFloat(document.getElementById('cashInput').value) || 0) : t.total;
   if (!online && payMethod === 'Tunai' && cash < t.total) return;
 
-  const rate = channelRate(channel);
-  const commission = Math.round(t.total * rate / 100);
+  const custName = document.getElementById('custName').value.trim();
+  const custPhone = document.getElementById('custPhone').value.trim();
   const trx = {
     uid: Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
     id: 'TRX-' + String(state.nextTrxNum).padStart(4, '0'),
@@ -1021,9 +1446,22 @@ function confirmPayment() {
     subtotal: t.subtotal, discount: t.discount, tax: t.tax, total: t.total,
     method: online ? channel : payMethod, cash: cash, change: cash - t.total,
     channel: channel, ref: online ? document.getElementById('refInput').value.trim() : '',
-    commission: commission, net: t.total - commission,
+    commission: 0, net: t.total,
     cashier: state.cashier,
+    branch: state.settings.branchName || '',
+    custName: custName, custPhone: custPhone,
+    voucher: activeVoucher ? activeVoucher.code : '', voucherCut: t.voucherCut || 0,
   };
+
+  // membership: remember the customer and their running totals
+  if (custPhone) {
+    const c = state.customers[custPhone] || { name: '', visits: 0, spent: 0, lastVisit: '' };
+    if (custName) c.name = custName;
+    c.visits++;
+    c.spent += t.total;
+    c.lastVisit = trx.time;
+    state.customers[custPhone] = c;
+  }
   state.nextTrxNum++;
   state.transactions.unshift(trx);
 
@@ -1041,6 +1479,7 @@ function confirmPayment() {
   channel = 'Toko';
   renderChannelChips();
   clearCart();
+  renderFavourites();
   syncNow();
 }
 
@@ -1052,10 +1491,14 @@ function showReceipt(trx) {
   let html = `
     ${state.settings.logo ? `<div class="r-center" style="margin-bottom:6px;"><img src="${state.settings.logo}" style="max-height:44px;max-width:150px;object-fit:contain;"></div>` : ''}
     <div class="r-center r-bold">${esc(state.settings.storeName)}</div>
-    <div class="r-center">Struk Pembayaran</div>
+    ${trx.branch || state.settings.branchName ? `<div class="r-center">${esc(trx.branch || state.settings.branchName)}</div>` : ''}
+    ${state.settings.branchAddress ? `<div class="r-center r-small">${esc(state.settings.branchAddress)}</div>` : ''}
+    ${state.settings.branchPhone ? `<div class="r-center r-small">Telp ${esc(state.settings.branchPhone)}</div>` : ''}
     <div class="r-line"></div>
     <div class="r-row"><span>${trx.id}</span><span>${timeStr}</span></div>
-    ${trx.cashier ? `<div class="r-row"><span>Kasir</span><span>${esc(trx.cashier)}</span></div>` : ''}`;
+    ${trx.cashier ? `<div class="r-row"><span>Kasir</span><span>${esc(trx.cashier)}</span></div>` : ''}
+    ${trx.custName ? `<div class="r-row"><span>Pemesan</span><span>${esc(trx.custName)}</span></div>` : ''}
+    ${trx.custPhone ? `<div class="r-row"><span>No. HP</span><span>${esc(trx.custPhone)}</span></div>` : ''}`;
   if (trx.channel && trx.channel !== 'Toko') {
     html += `<div class="r-row"><span>Kanal</span><span>${trx.channel}${trx.ref ? ' #' + esc(trx.ref) : ''}</span></div>`;
   }
@@ -1066,18 +1509,42 @@ function showReceipt(trx) {
   html += `<div class="r-line"></div>
     <div class="r-row"><span>Subtotal</span><span>${fmt(trx.subtotal)}</span></div>`;
   if (trx.discount > 0) html += `<div class="r-row"><span>Diskon</span><span>-${fmt(trx.discount)}</span></div>`;
+  if (trx.voucherCut > 0) html += `<div class="r-row"><span>Voucher ${esc(trx.voucher || '')}</span><span>-${fmt(trx.voucherCut)}</span></div>`;
   if (trx.tax > 0) html += `<div class="r-row"><span>Pajak PB1</span><span>${fmt(trx.tax)}</span></div>`;
   html += `<div class="r-row r-bold"><span>TOTAL</span><span>${fmt(trx.total)}</span></div>
     <div class="r-line"></div>
     <div class="r-row"><span>${trx.method}</span><span>${fmt(trx.cash)}</span></div>`;
   if (trx.method === 'Tunai') html += `<div class="r-row"><span>Kembalian</span><span>${fmt(trx.change)}</span></div>`;
+  if (isOnlineChannel(trx.channel)) {
+    html += `<div class="r-line"></div><div class="r-center r-small">Pesanan ${trx.channel} — struk resmi dari aplikasi ${trx.channel}</div>`;
+  }
   html += `<div class="r-line"></div>
-    <div class="r-center">Terima kasih! 🙏</div>`;
+    <div class="r-center">${esc(state.settings.receiptNote || 'Terima kasih!')}</div>`;
   document.getElementById('receiptPrint').innerHTML = html;
   document.getElementById('receiptModal').classList.add('show');
 }
 
 function closeReceipt() { document.getElementById('receiptModal').classList.remove('show'); }
+
+// Prints on 58mm thermal roll. The receipt is measured at 58mm-equivalent width
+// first, so the @page height matches the content and the printer does not feed
+// a whole blank page after each struk.
+const PRINT_WIDTH_MM = 58, PRINT_CONTENT_MM = 54;
+function printReceipt() {
+  const el = document.getElementById('receiptPrint');
+  const prev = el.getAttribute('style') || '';
+  // measure at the printed width (mm -> px at 96dpi)
+  const contentPx = PRINT_CONTENT_MM / 25.4 * 96;
+  el.setAttribute('style', prev + ';width:' + contentPx + 'px;font-family:"Courier New",monospace;font-size:12px;line-height:1.35;');
+  const heightMm = el.scrollHeight / 96 * 25.4 + 8;   // + feed margin for the cutter
+  el.setAttribute('style', prev);
+
+  let tag = document.getElementById('printPageSize');
+  if (!tag) { tag = document.createElement('style'); tag.id = 'printPageSize'; document.head.appendChild(tag); }
+  tag.textContent = '@page { size: ' + PRINT_WIDTH_MM + 'mm ' + Math.max(40, Math.round(heightMm)) + 'mm; margin: 0; }';
+
+  window.print();
+}
 
 // ── PRODUK PAGE ───────────────────────────────────────────────────────────
 function renderProductTable() {
@@ -1089,6 +1556,7 @@ function renderProductTable() {
       ? `<img src="${p.img}" style="width:64px;height:36px;object-fit:cover;border-radius:6px;vertical-align:middle;">`
       : `<span style="font-size:20px;vertical-align:middle;">${esc(p.emoji)}</span>`;
     tr.innerHTML = `
+      <td><button class="fav-star" title="Jadikan menu favorit (maks 9)" onclick="toggleFav(${i})">${p.fav ? '⭐' : '☆'}</button></td>
       <td style="white-space:nowrap;">
         ${thumb}
         <label class="add-btn" style="font-size:11px;padding:4px 8px;cursor:pointer;margin-left:6px;display:inline-block;" title="Upload foto — format & ukuran bebas, tampil 16:9 di kasir">📷<input type="file" accept="image/*" style="display:none;" onchange="uploadImage(${i}, this)"></label>
@@ -1133,6 +1601,7 @@ async function removeProduct(i) {
 
 function refreshPos() {
   renderCatChips();
+  renderFavourites();
   renderProducts();
   renderCart();
 }
@@ -1223,8 +1692,22 @@ function renderReport() {
   const todayStr = dayKey(new Date());
   const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 6); weekAgo.setHours(0,0,0,0);
 
-  const todayTrx = state.transactions.filter(t => dayKey(new Date(t.time)) === todayStr);
-  const weekTrx  = state.transactions.filter(t => new Date(t.time) >= weekAgo);
+  // Branch filter — only shown once transactions from more than one branch exist
+  const branches = [...new Set(state.transactions.map(t => t.branch || '').filter(Boolean))].sort();
+  const bar = document.getElementById('branchFilterBar');
+  const sel = document.getElementById('branchFilter');
+  if (branches.length > 1) {
+    const current = sel.value;
+    sel.innerHTML = '<option value="">Semua cabang</option>' +
+      branches.map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('');
+    sel.value = branches.includes(current) ? current : '';
+    bar.style.display = 'flex';
+  } else { bar.style.display = 'none'; sel.innerHTML = ''; }
+  const branchPick = branches.length > 1 ? sel.value : '';
+  const inBranch = t => !branchPick || (t.branch || '') === branchPick;
+
+  const todayTrx = state.transactions.filter(t => inBranch(t) && dayKey(new Date(t.time)) === todayStr);
+  const weekTrx  = state.transactions.filter(t => inBranch(t) && new Date(t.time) >= weekAgo);
 
   const todayTotal = todayTrx.reduce((s,t) => s + t.total, 0);
   const weekTotal  = weekTrx.reduce((s,t) => s + t.total, 0);
@@ -1255,26 +1738,20 @@ function renderReport() {
       ).join('') + '</tbody></table>'
     : '<div style="font-size:13px;color:#bbb;">Belum ada transaksi minggu ini.</div>';
 
-  if (typeof Chart !== 'undefined') renderReportCharts(weekTrx);
+  if (typeof Chart !== 'undefined') renderReportCharts(weekTrx, inBranch);
 
   // Channel breakdown (older transactions without a channel count as Toko)
   const chIcons = { Toko: '🏪', GoFood: '🛵', GrabFood: '🛵' };
   document.getElementById('channelBreakdown').innerHTML = CHANNELS.map(c => {
     const trxs = weekTrx.filter(t => (t.channel || 'Toko') === c.id);
     const gross = trxs.reduce((s,t) => s + t.total, 0);
-    const comm = trxs.reduce((s,t) => s + (t.commission || 0), 0);
-    const rateInput = c.id === 'Toko' ? '' : `
-        <div style="font-size:11px;color:#888;margin-top:8px;">
-          Komisi <input type="number" value="${channelRate(c.id)}" min="0" max="100" onchange="setComm('${c.id}', this.value)" style="width:48px;border:1px solid #e5e5e0;border-radius:6px;padding:3px 6px;font-size:11px;text-align:right;background:#fff;outline:none;font-family:inherit;"> %
-        </div>`;
+    const items = trxs.reduce((s,t) => s + t.items.reduce((a,it)=>a+it.qty,0), 0);
     return `
       <div style="background:#fafafa;border:1px solid #f0f0ec;border-radius:10px;padding:14px;text-align:center;">
         <div style="font-size:22px;margin-bottom:6px;">${chIcons[c.id]}</div>
         <div style="font-size:12px;font-weight:600;color:${c.dot};margin-bottom:4px;">${c.label}</div>
         <div style="font-size:16px;font-weight:600;">${fmt(gross)}</div>
-        <div style="font-size:11px;color:#888;margin-top:2px;">${trxs.length} transaksi${comm > 0 ? ' · komisi -' + fmt(comm) : ''}</div>
-        ${comm > 0 ? `<div style="font-size:12px;font-weight:600;color:#27ae60;margin-top:2px;">Bersih ${fmt(gross - comm)}</div>` : ''}
-        ${rateInput}
+        <div style="font-size:11px;color:#888;margin-top:2px;">${trxs.length} transaksi · ${items} item</div>
       </div>`;
   }).join('');
 
@@ -1350,7 +1827,7 @@ function resetTransactions() {
 }
 
 function resetAll() {
-  if (!confirm('Reset ke awal?\n\n• Semua transaksi dihapus\n• Daftar produk kembali ke contoh bawaan (foto hilang, stok penuh)\n• Pengaturan cloud & komisi tetap tersimpan\n\nTindakan ini tidak bisa dibatalkan.')) return;
+  if (!confirm('Reset ke awal?\n\n• Semua transaksi dihapus\n• Daftar produk kembali ke contoh bawaan (foto hilang, stok penuh)\n• Pengaturan toko, cabang, voucher & cloud tetap tersimpan\n\nTindakan ini tidak bisa dibatalkan.')) return;
   if (!confirm('Sekali lagi — yakin mau reset semuanya?')) return;
   const keepSettings = state.settings;
   state = {
@@ -1375,23 +1852,15 @@ function resetAll() {
   alert('Selesai. Aplikasi sudah kembali ke kondisi awal.' + (cloudEnabled() ? '\n\nCatatan: data di Supabase belum terhapus — hapus juga lewat Table Editor di dashboard Supabase.' : ''));
 }
 
-function setComm(ch, val) {
-  const v = Math.min(Math.max(parseFloat(val) || 0, 0), 100);
-  if (ch === 'GoFood') state.settings.commGoFood = v;
-  else state.settings.commGrabFood = v;
-  saveData();
-  renderReport();
-  renderCart();
-}
 
-function renderReportCharts(weekTrx) {
+function renderReportCharts(weekTrx, inBranch) {
   // Sales last 7 days
   const labels = [], data = [];
   for (let i = 6; i >= 0; i--) {
     const d = new Date(); d.setDate(d.getDate() - i);
     const key = dayKey(d);
     labels.push(days[d.getDay()].slice(0,3) + ' ' + d.getDate());
-    data.push(state.transactions.filter(t => dayKey(new Date(t.time)) === key).reduce((s,t) => s + t.total, 0) / 1000);
+    data.push(state.transactions.filter(t => inBranch(t) && dayKey(new Date(t.time)) === key).reduce((s,t) => s + t.total, 0) / 1000);
   }
   if (salesChartObj) salesChartObj.destroy();
   salesChartObj = new Chart(document.getElementById('salesChart').getContext('2d'), {
@@ -1454,6 +1923,7 @@ function trxToRow(t) {
   return {
     uid: t.uid, trx_id: t.id, time: t.time,
     channel: t.channel || 'Toko', method: t.method, ref: t.ref || '', cashier: t.cashier || '',
+    branch: t.branch || '', cust_name: t.custName || '', cust_phone: t.custPhone || '', voucher: t.voucher || '',
     subtotal: t.subtotal, discount: t.discount, tax: t.tax, total: t.total,
     commission: t.commission || 0, net: t.net != null ? t.net : t.total,
     items: t.items,
@@ -1487,7 +1957,7 @@ async function syncNow() {
 function productToRow(p) {
   return {
     id: p.id, name: p.name, cat: p.cat, emoji: p.emoji || '📦',
-    price: p.price, stock: p.stock, img: p.img || null,
+    price: p.price, stock: p.stock, img: p.img || null, fav: !!p.fav,
     updated_at: new Date().toISOString(),
   };
 }
@@ -1551,7 +2021,7 @@ async function cloudPull() {
         const local = state.products.find(p => p.id === r.id);
         const incoming = {
           id: r.id, name: r.name, cat: r.cat, emoji: r.emoji || '📦',
-          price: +r.price, stock: +r.stock,
+          price: +r.price, stock: +r.stock, fav: !!r.fav,
         };
         if (r.img) incoming.img = r.img;
         if (local) { Object.assign(local, incoming); pUpdated++; }
@@ -1571,7 +2041,7 @@ async function cloudPull() {
       if (known.has(r.uid)) return;
       state.transactions.push({
         uid: r.uid, id: r.trx_id, time: r.time, channel: r.channel, method: r.method,
-        ref: r.ref, cashier: r.cashier || '', subtotal: +r.subtotal, discount: +r.discount, tax: +r.tax,
+        ref: r.ref, cashier: r.cashier || '', branch: r.branch || '', custName: r.cust_name || '', custPhone: r.cust_phone || '', voucher: r.voucher || '', subtotal: +r.subtotal, discount: +r.discount, tax: +r.tax,
         total: +r.total, commission: +r.commission, net: +r.net,
         items: typeof r.items === 'string' ? JSON.parse(r.items) : (r.items || []),
         cash: +r.total, change: 0,
@@ -1666,14 +2136,15 @@ function updateCloudBadge() {
 function exportCSV() {
   if (state.transactions.length === 0) { alert('Belum ada transaksi.'); return; }
   const esc2 = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-  const header = ['No Transaksi','Waktu','Kasir','Kanal','Metode','No Pesanan','Item','Subtotal','Diskon','Pajak','Total','Komisi','Bersih'];
+  const header = ['No Transaksi','Waktu','Kasir','Cabang','Kanal','Metode','No Pesanan','Nama Pemesan','No HP','Voucher','Item','Subtotal','Diskon','Potongan Voucher','Pajak','Total'];
   const lines = [header.join(',')];
   state.transactions.forEach(t => {
     lines.push([
       esc2(t.id), esc2(new Date(t.time).toLocaleString('id-ID')), esc2(t.cashier || ''),
-      esc2(t.channel || 'Toko'), esc2(t.method), esc2(t.ref || ''),
+      esc2(t.branch || ''), esc2(t.channel || 'Toko'), esc2(t.method), esc2(t.ref || ''),
+      esc2(t.custName || ''), esc2(t.custPhone || ''), esc2(t.voucher || ''),
       esc2(t.items.map(it => it.name + ' x' + it.qty).join('; ')),
-      t.subtotal, t.discount, t.tax, t.total, t.commission || 0, t.net != null ? t.net : t.total,
+      t.subtotal, t.discount, t.voucherCut || 0, t.tax, t.total,
     ].join(','));
   });
   const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
@@ -1687,6 +2158,9 @@ function exportCSV() {
 // ── INIT ──────────────────────────────────────────────────────────────────
 renderBranding();
 renderCashier();
+applyRoleVisibility();
+applyChannelTaxRule();
+renderFavourites();
 renderCatChips();
 renderChannelChips();
 renderProducts();

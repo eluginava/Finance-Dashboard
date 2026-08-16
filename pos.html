@@ -110,6 +110,13 @@
   .sum-row.muted { color: #999; font-size: 12px; }
 
   /* Panel pelanggan di keranjang */
+  .vp-opt { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left;
+            border: 1.5px solid #e5e5e0; background: #fff; border-radius: 10px; padding: 12px 14px;
+            margin-bottom: 8px; cursor: pointer; font-family: inherit; }
+  .vp-opt:hover { border-color: #1a1a1a; }
+  .vp-name { font-size: 14px; font-weight: 600; }
+  .vp-meta { font-size: 12px; color: #555; }
+
   .cust-panel { background: #fafafa; border: 1px solid #f0f0ec; border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; }
   .cust-title { font-size: 12px; font-weight: 600; color: #555; margin-bottom: 8px; }
   .cust-input { width: 100%; border: 1px solid #e5e5e0; border-radius: 7px; padding: 7px 10px; font-size: 13px; background: #fff; outline: none; font-family: inherit; margin-bottom: 6px; }
@@ -358,6 +365,10 @@
           <div class="sum-row total"><span>Total</span><span id="cartTotal">Rp 0</span></div>
         </div>
         <button class="pay-btn" id="payBtn" onclick="openPayment()" disabled>Bayar</button>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <button class="add-btn" style="flex:1;font-size:12px;" id="holdBtn" onclick="holdOrder()">💾 Simpan Bon</button>
+          <button class="add-btn" style="flex:1;font-size:12px;display:none;" id="heldBtn" onclick="openHeldOrders()">📋 Bon Tersimpan</button>
+        </div>
       </div>
     </div>
   </div>
@@ -783,17 +794,44 @@
     </div>
     <div id="payCustLine" style="font-size:13px;color:#555;background:#f5f5f3;border-radius:8px;padding:10px 12px;margin-bottom:12px;"></div>
     <div id="cashSection">
-      <label>Uang diterima (Rp)</label>
+      <label id="payAmountLabel">Jumlah dibayar (Rp)</label>
       <input type="number" id="cashInput" placeholder="0" oninput="updateChange()">
       <div class="cash-quick" id="cashQuick"></div>
-      <div class="change-box">
-        <span class="c-label">Kembalian</span>
-        <span class="c-val" id="changeVal">Rp 0</span>
-      </div>
+      <button class="add-btn" style="width:100%;margin-top:8px;" onclick="addPayment()">+ Tambah Pembayaran</button>
+    </div>
+    <div id="paymentList" style="margin-top:12px;"></div>
+    <div class="change-box">
+      <span class="c-label" id="remainLabel">Sisa</span>
+      <span class="c-val" id="changeVal">Rp 0</span>
     </div>
     <div class="modal-actions">
       <button class="btn btn-cancel" onclick="closePayment()">Batal</button>
       <button class="btn btn-primary" id="confirmPayBtn" onclick="confirmPayment()">Selesaikan</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ PEMILIH VARIAN (kasir) ═══ -->
+<div class="modal-overlay" id="variantPicker">
+  <div class="modal" style="max-width:380px;">
+    <h2 id="vpTitle">Pilih Varian</h2>
+    <div id="vpBody"></div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeVariantPicker()">Batal</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ BON TERSIMPAN ═══ -->
+<div class="modal-overlay" id="heldModal">
+  <div class="modal" style="max-width:460px;">
+    <h2>📋 Bon Tersimpan</h2>
+    <p style="font-size:12px;color:#888;line-height:1.6;margin-bottom:12px;">
+      Bon tersimpan di perangkat ini saja dan belum mengurangi stok — stok baru berkurang setelah dibayar.
+    </p>
+    <div id="heldBody"></div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeHeldOrders()">Tutup</button>
     </div>
   </div>
 </div>
@@ -1009,7 +1047,7 @@ create index if not exists pos_transactions_branch_idx on pos_transactions (bran
 <script>
 // ── DATA ──────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'elva_pos_v1';
-const APP_VERSION = 'v13 · 2026-08-16';   // shown in Profile so the live build is identifiable
+const APP_VERSION = 'v14 · 2026-08-16';   // shown in Profile so the live build is identifiable
 
 const defaultProducts = [
   { id: 1,  name: 'Kopi Susu Gula Aren', emoji: '🧋', cat: 'Minuman', price: 22000, stock: 50 },
@@ -1063,6 +1101,7 @@ if (!state.categories) state.categories = [];   // 2 level: parentId null = Grup
 if (!state.master) state.master = [];           // master produk lintas toko
 if (!state.variants) state.variants = [];       // varian per produk
 if (!state.storeProducts) state.storeProducts = [];  // jual/harga/stok per toko per varian
+if (!state.heldOrders) state.heldOrders = [];         // bon tersimpan, lokal per perangkat
 if (!state.deviceId) state.deviceId = 'dev-' + Math.random().toString(36).slice(2, 10);
 if (!state.customers) state.customers = {};   // phone -> { name, visits, spent, lastVisit }
 if (!state.settings.supabaseUrl) state.settings.supabaseUrl = '';
@@ -1074,9 +1113,11 @@ if (!state.settings.logo) state.settings.logo = '';
 if (!state.settings.cashiers) state.settings.cashiers = [];   // remembered names
 if (state.cashier === undefined) state.cashier = '';          // who is on shift now
 if (!state.shiftStart) state.shiftStart = '';
-let cart = [];          // { productId, qty }
+let cart = [];          // { key, qty } — key = pkey store_product
 let activeCat = 'Semua';
 let payMethod = 'Tunai';
+let payments = [];        // [{ method, amount }] — mendukung bayar terpisah
+let cashReceived = 0;     // total uang tunai fisik yang diterima
 let channel = 'Toko';   // Toko | GoFood | GrabFood
 
 const CHANNELS = [
@@ -1088,7 +1129,10 @@ const CHANNELS = [
 function isOnlineChannel(ch) { return ch === 'GoFood' || ch === 'GrabFood'; }
 
 // ── UTILS ─────────────────────────────────────────────────────────────────
-function fmt(n) { return 'Rp ' + Math.round(n).toLocaleString('id-ID'); }
+function fmt(n) {
+  const v = Math.round(n);
+  return 'Rp ' + (Object.is(v, -0) ? 0 : v).toLocaleString('id-ID');
+}
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function dayKey(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
 
@@ -2451,11 +2495,21 @@ function renderProducts() {
   const grid = document.getElementById('productGrid');
   const q = document.getElementById('searchInput').value.toLowerCase();
   grid.innerHTML = '';
+  // Satu kartu per produk. Kalau produknya punya lebih dari satu varian aktif,
+  // kartunya membuka pemilih varian, bukan langsung masuk keranjang.
+  const groups = new Map();
   sellableItems()
     .filter(p => (activeCat === 'Semua' || p.cat === activeCat) && p.label.toLowerCase().includes(q))
     .forEach(p => {
-      const inCart = cart.find(c => c.key === p.key);
-      const left = p.stock - (inCart ? inCart.qty : 0);
+      if (!groups.has(p.productId)) groups.set(p.productId, []);
+      groups.get(p.productId).push(p);
+    });
+  [...groups.values()]
+    .forEach(g => {
+      const p = g[0];
+      const multi = g.length > 1;
+      const inCart = cart.filter(c => g.some(x => x.key === c.key)).reduce((s, c) => s + c.qty, 0);
+      const left = g.reduce((s, x) => s + x.stock, 0) - inCart;
       let stockClass = '', stockText = 'Stok: ' + left + (p.unit ? ' ' + p.unit : '');
       if (left < 0)        { stockClass = 'empty'; stockText = 'Stok: ' + left + ' ⚠'; }
       else if (left === 0) { stockClass = 'empty'; stockText = 'Stok: 0'; }
@@ -2465,13 +2519,15 @@ function renderProducts() {
       const thumb = p.img
         ? `<img class="product-thumb" src="${p.img}" alt="${esc(p.name)}">`
         : `<div class="product-thumb">${p.emoji}</div>`;
+      const prices = [...new Set(g.map(x => x.price))];
+      const priceLabel = prices.length > 1 ? 'mulai ' + fmt(Math.min(...prices)) : fmt(p.price);
       card.innerHTML = `
         ${thumb}
-        <div class="product-name">${esc(p.name)}${p.variantName ? `<span style="display:block;font-weight:500;color:#888;font-size:11px;">${esc(p.variantName)}</span>` : ''}</div>
-        <div class="product-price">${fmt(p.price)}</div>
+        <div class="product-name">${esc(p.name)}${multi ? `<span style="display:block;font-weight:500;color:#888;font-size:11px;">${g.length} varian</span>` : ''}</div>
+        <div class="product-price">${priceLabel}</div>
         <div class="product-stock ${stockClass}">${stockText}</div>
       `;
-      card.onclick = () => addToCart(p.key);
+      card.onclick = () => multi ? openVariantPicker(p.productId) : addToCart(p.key);
       grid.appendChild(card);
     });
 }
@@ -2597,7 +2653,105 @@ function renderCart() {
   const online = isOnlineChannel(channel);
   const payBtn = document.getElementById('payBtn');
   payBtn.disabled = cart.length === 0;
+  const hb = document.getElementById('holdBtn');
+  if (hb) hb.disabled = cart.length === 0;
   payBtn.textContent = online ? 'Selesaikan Pesanan ' + channel : 'Bayar';
+}
+
+// ── PEMILIH VARIAN ────────────────────────────────────────────────────────
+function openVariantPicker(productId) {
+  const opts = sellableItems().filter(x => x.productId === productId);
+  if (!opts.length) return;
+  if (opts.length === 1) { addToCart(opts[0].key); return; }
+  document.getElementById('vpTitle').textContent = opts[0].name;
+  document.getElementById('vpBody').innerHTML = opts.map(o => {
+    const inCart = cart.find(c => c.key === o.key);
+    const left = o.stock - (inCart ? inCart.qty : 0);
+    return `<button class="vp-opt" onclick="pickVariant('${o.key}')">
+      <span class="vp-name">${esc(o.variantName || 'Biasa')}</span>
+      <span class="vp-meta">${fmt(o.price)}${o.unit ? ' / ' + esc(o.unit) : ''} · <span style="${left < 0 ? 'color:#c0392b;font-weight:600;' : 'color:#888;'}">stok ${left}</span></span>
+    </button>`;
+  }).join('');
+  document.getElementById('variantPicker').classList.add('show');
+}
+function closeVariantPicker() { document.getElementById('variantPicker').classList.remove('show'); }
+function pickVariant(key) { addToCart(key); closeVariantPicker(); }
+
+// ── SIMPAN BON (tahan pesanan) ────────────────────────────────────────────
+// Bon bersifat sementara dan hanya relevan di terminal ini, jadi disimpan lokal
+// dan tidak disinkronkan ke cloud.
+function holdOrder() {
+  if (!cart.length) return;
+  const label = (prompt('Simpan bon dengan nama / nomor meja:', 'Meja ' + (state.heldOrders.length + 1)) || '').trim();
+  if (!label) return;
+  state.heldOrders.unshift({
+    id: Date.now().toString(36), label,
+    items: cart.map(c => ({ ...c })),
+    discount: parseFloat(document.getElementById('discountInput').value) || 0,
+    voucher: activeVoucher ? activeVoucher.code : '',
+    channel,
+    custName: document.getElementById('cartCustName').value.trim(),
+    custPhone: document.getElementById('cartCustPhone').value.trim(),
+    createdAt: new Date().toISOString(),
+    cashier: state.cashier || '',
+  });
+  saveData();
+  clearCart(); clearCustPanel();
+  renderHeldBar();
+}
+
+function renderHeldBar() {
+  const btn = document.getElementById('heldBtn');
+  if (!btn) return;
+  btn.style.display = state.heldOrders.length ? '' : 'none';
+  btn.textContent = '📋 Bon Tersimpan (' + state.heldOrders.length + ')';
+}
+
+function openHeldOrders() {
+  document.getElementById('heldBody').innerHTML = state.heldOrders.length
+    ? state.heldOrders.map((h, i) => {
+        const total = h.items.reduce((s, it) => {
+          const p = itemByKey(it.key);
+          return s + (p ? p.price * it.qty : 0);
+        }, 0);
+        return `<div style="border:1px solid #f0f0ec;border-radius:10px;padding:12px;margin-bottom:8px;display:flex;align-items:center;gap:10px;">
+          <div style="flex:1;min-width:0;">
+            <div style="font-weight:600;">${esc(h.label)}</div>
+            <div style="font-size:12px;color:#888;">${h.items.reduce((s, x) => s + x.qty, 0)} item · ${fmt(total)} · ${new Date(h.createdAt).toLocaleTimeString('id-ID', {hour:'2-digit',minute:'2-digit'})}${h.custName ? ' · ' + esc(h.custName) : ''}</div>
+          </div>
+          <button class="add-btn" style="font-size:12px;padding:5px 12px;" onclick="recallHeld(${i})">Panggil</button>
+          <button class="del-btn" onclick="deleteHeld(${i})" title="Buang bon">✕</button>
+        </div>`;
+      }).join('')
+    : '<div style="font-size:13px;color:#bbb;">Tidak ada bon tersimpan.</div>';
+  document.getElementById('heldModal').classList.add('show');
+}
+function closeHeldOrders() { document.getElementById('heldModal').classList.remove('show'); }
+
+function recallHeld(i) {
+  const h = state.heldOrders[i];
+  if (!h) return;
+  if (cart.length && !confirm('Keranjang sekarang akan diganti dengan bon "' + h.label + '". Lanjutkan?')) return;
+  cart = h.items.map(c => ({ ...c }));
+  channel = h.channel || 'Toko';
+  document.getElementById('discountInput').value = h.discount || 0;
+  document.getElementById('cartCustName').value = h.custName || '';
+  document.getElementById('cartCustPhone').value = h.custPhone || '';
+  activeVoucher = null;
+  document.getElementById('voucherInput').value = h.voucher || '';
+  if (h.voucher) applyVoucher();
+  state.heldOrders.splice(i, 1);
+  saveData();
+  closeHeldOrders(); renderHeldBar(); renderChannelChips(); applyChannelTaxRule();
+  lookupCartCustomer(); refreshPos();
+}
+
+function deleteHeld(i) {
+  const h = state.heldOrders[i];
+  if (!h || !confirm('Buang bon "' + h.label + '"?')) return;
+  state.heldOrders.splice(i, 1);
+  saveData();
+  openHeldOrders(); renderHeldBar();
 }
 
 // ── PAYMENT ───────────────────────────────────────────────────────────────
@@ -2625,11 +2779,11 @@ function openPayment() {
     document.getElementById('cashSection').style.display = 'none';
     document.getElementById('confirmPayBtn').disabled = false;
   } else {
-    payMethod = 'Tunai';
-    document.querySelectorAll('.method-btn').forEach(b => b.classList.toggle('active', b.dataset.method === 'Tunai'));
+    payments = []; cashReceived = 0;
     document.getElementById('cashSection').style.display = 'block';
-    document.getElementById('cashInput').value = '';
+    selectMethod('Tunai');          // sekaligus memunculkan lagi tombol uang cepat
     renderCashQuick(t.total);
+    renderPayments();
     updateChange();
   }
   document.getElementById('payModal').classList.add('show');
@@ -2640,7 +2794,57 @@ function closePayment() { document.getElementById('payModal').classList.remove('
 function selectMethod(m) {
   payMethod = m;
   document.querySelectorAll('.method-btn').forEach(b => b.classList.toggle('active', b.dataset.method === m));
-  document.getElementById('cashSection').style.display = m === 'Tunai' ? 'block' : 'none';
+  document.getElementById('cashQuick').style.display = m === 'Tunai' ? '' : 'none';
+  document.getElementById('payAmountLabel').textContent =
+    m === 'Tunai' ? 'Uang tunai diterima (Rp)' : 'Jumlah dibayar ' + m + ' (Rp)';
+  document.getElementById('cashInput').value = '';
+  updateChange();
+}
+
+// Sisa tagihan setelah pembayaran yang sudah ditambahkan.
+function paidSoFar()  { return payments.reduce((s, p) => s + p.amount, 0); }
+function remainingDue() { return Math.max(0, cartTotals().total - paidSoFar()); }
+
+function renderPayments() {
+  const wrap = document.getElementById('paymentList');
+  if (!payments.length) { wrap.innerHTML = ''; return; }
+  wrap.innerHTML = '<div style="font-size:12px;color:#888;margin-bottom:6px;">Pembayaran</div>' +
+    payments.map((p, i) => `
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f0f0ec;font-size:13px;">
+        <span style="flex:1;">${esc(p.method)}</span>
+        <span style="font-weight:600;">${fmt(p.amount)}</span>
+        <button class="del-btn" onclick="removePayment(${i})" title="Hapus">✕</button>
+      </div>`).join('');
+}
+
+// Menambahkan satu pembayaran. Untuk tunai, kelebihan uang jadi kembalian —
+// bukan dianggap membayar lebih dari tagihan.
+function addPayment() {
+  const due = remainingDue();
+  if (due <= 0) { alert('Tagihan sudah lunas.'); return; }
+  const entered = parseFloat(document.getElementById('cashInput').value) || 0;
+  if (entered <= 0) { alert('Isi jumlah yang dibayar dulu.'); return; }
+  const applied = Math.min(entered, due);
+  if (payMethod !== 'Tunai' && entered > due) {
+    alert('Pembayaran non-tunai tidak boleh melebihi sisa tagihan (' + fmt(due) + ').');
+    return;
+  }
+  if (payMethod === 'Tunai') cashReceived += entered;
+  const existing = payments.find(p => p.method === payMethod);
+  if (existing) existing.amount += applied; else payments.push({ method: payMethod, amount: applied });
+  document.getElementById('cashInput').value = '';
+  renderPayments();
+  renderCashQuick(remainingDue());
+  updateChange();
+}
+
+function removePayment(i) {
+  const p = payments[i];
+  if (!p) return;
+  if (p.method === 'Tunai') cashReceived = Math.max(0, cashReceived - p.amount);
+  payments.splice(i, 1);
+  renderPayments();
+  renderCashQuick(remainingDue());
   updateChange();
 }
 
@@ -2652,21 +2856,35 @@ function renderCashQuick(total) {
     Math.ceil(total / 50000) * 50000,
     Math.ceil(total / 100000) * 100000,
   ])].slice(0, 6);
-  document.getElementById('cashQuick').innerHTML = opts.map(v =>
+  document.getElementById('cashQuick').innerHTML = opts.filter(v => v > 0).map(v =>
     `<button onclick="document.getElementById('cashInput').value=${v};updateChange()">${fmt(v)}</button>`
   ).join('');
 }
 
 function updateChange() {
-  const t = cartTotals();
   const btn = document.getElementById('confirmPayBtn');
-  if (isOnlineChannel(channel) || payMethod !== 'Tunai') { btn.disabled = false; return; }
-  const cash = parseFloat(document.getElementById('cashInput').value) || 0;
-  const change = cash - t.total;
+  if (isOnlineChannel(channel)) { btn.disabled = false; return; }
+  const t = cartTotals();
   const el = document.getElementById('changeVal');
-  el.textContent = fmt(change);
-  el.className = 'c-val' + (change < 0 ? ' minus' : '');
-  btn.disabled = change < 0;
+  const label = document.getElementById('remainLabel');
+
+  // Belum ada pembayaran tercatat: pakai angka yang sedang diketik supaya
+  // transaksi tunai biasa tetap satu langkah seperti sebelumnya.
+  const typed = parseFloat(document.getElementById('cashInput').value) || 0;
+  const paid = paidSoFar() + (payMethod === 'Tunai' ? typed : Math.min(typed, Math.max(0, t.total - paidSoFar())));
+  const short = t.total - paid;
+
+  if (short > 0) {
+    label.textContent = 'Sisa';
+    el.textContent = fmt(short);
+    el.className = 'c-val minus';
+    btn.disabled = true;
+  } else {
+    label.textContent = 'Kembalian';
+    el.textContent = fmt(-short);
+    el.className = 'c-val';
+    btn.disabled = false;
+  }
 }
 
 // Nomor transaksi diberi awalan kode toko supaya tidak bertabrakan antar
@@ -2679,8 +2897,27 @@ function trxPrefix() {
 function confirmPayment() {
   const t = cartTotals();
   const online = isOnlineChannel(channel);
-  const cash = (!online && payMethod === 'Tunai') ? (parseFloat(document.getElementById('cashInput').value) || 0) : t.total;
-  if (!online && payMethod === 'Tunai' && cash < t.total) return;
+  // Rangkum pembayaran: yang sudah ditambahkan + yang sedang diketik.
+  let pays, cashIn;
+  if (online) {
+    pays = [{ method: channel, amount: t.total }];
+    cashIn = t.total;
+  } else {
+    const typed = parseFloat(document.getElementById('cashInput').value) || 0;
+    pays = payments.map(p => ({ ...p }));
+    const due = Math.max(0, t.total - pays.reduce((s, p) => s + p.amount, 0));
+    if (typed > 0 && due > 0) {
+      const applied = Math.min(typed, due);
+      const ex = pays.find(p => p.method === payMethod);
+      if (ex) ex.amount += applied; else pays.push({ method: payMethod, amount: applied });
+      if (payMethod === 'Tunai') cashReceived += typed;
+    }
+    if (pays.reduce((s, p) => s + p.amount, 0) < t.total) return;   // belum lunas
+    cashIn = cashReceived || t.total;
+  }
+  const cashApplied = pays.filter(p => p.method === 'Tunai').reduce((s, p) => s + p.amount, 0);
+  const changeDue = Math.max(0, cashIn - cashApplied);
+  const methodLabel = pays.map(p => p.method).join('+');
 
   const custName = document.getElementById('cartCustName').value.trim();
   const custPhone = normalizePhone(document.getElementById('cartCustPhone').value);
@@ -2697,7 +2934,7 @@ function confirmPayment() {
       };
     }),
     subtotal: t.subtotal, discount: t.discount, tax: t.tax, total: t.total,
-    method: online ? channel : payMethod, cash: cash, change: cash - t.total,
+    method: methodLabel, payments: pays, cash: cashIn, change: changeDue,
     channel: channel, ref: online ? document.getElementById('refInput').value.trim() : '',
     commission: 0, net: t.total,
     cashier: state.cashier,
@@ -2772,8 +3009,12 @@ function showReceipt(trx, isReprint) {
   if (trx.tax > 0) html += `<div class="r-row"><span>Pajak PB1</span><span>${fmt(trx.tax)}</span></div>`;
   html += `<div class="r-row r-bold"><span>TOTAL</span><span>${fmt(trx.total)}</span></div>
     <div class="r-line"></div>
-    <div class="r-row"><span>${trx.method}</span><span>${fmt(trx.cash)}</span></div>`;
-  if (trx.method === 'Tunai') html += `<div class="r-row"><span>Kembalian</span><span>${fmt(trx.change)}</span></div>`;
+    ${(trx.payments && trx.payments.length
+        ? trx.payments.map(p => `<div class="r-row"><span>${esc(p.method)}</span><span>${fmt(p.amount)}</span></div>`).join('')
+        : `<div class="r-row"><span>${esc(trx.method)}</span><span>${fmt(trx.cash)}</span></div>`)}`;
+  const hasCash = (trx.payments || []).some(p => p.method === 'Tunai') || trx.method === 'Tunai';
+  if (hasCash && trx.cash > 0) html += `<div class="r-row"><span>Tunai diterima</span><span>${fmt(trx.cash)}</span></div>`;
+  if (trx.change > 0) html += `<div class="r-row"><span>Kembalian</span><span>${fmt(trx.change)}</span></div>`;
   if (isOnlineChannel(trx.channel)) {
     html += `<div class="r-line"></div><div class="r-center r-small">Pesanan ${trx.channel} — struk resmi dari aplikasi ${trx.channel}</div>`;
   }
@@ -3026,8 +3267,11 @@ function renderReport() {
   const methods = ['Tunai', 'QRIS', 'Kartu'];
   const icons = { Tunai: '💵', QRIS: '📱', Kartu: '💳' };
   document.getElementById('methodBreakdown').innerHTML = methods.map(m => {
-    const trxs = weekTrx.filter(t => t.method === m);
-    const total = trxs.reduce((s,t) => s + t.total, 0);
+    // Split payment: nilainya dibagi ke tiap metode, bukan dihitung penuh di satu metode.
+    const trxs = weekTrx.filter(t => (t.payments || []).some(p => p.method === m) || t.method === m);
+    const total = weekTrx.reduce((s, t) => s + ((t.payments && t.payments.length)
+      ? t.payments.filter(p => p.method === m).reduce((a, p) => a + p.amount, 0)
+      : (t.method === m ? t.total : 0)), 0);
     return `
       <div style="background:#fafafa;border:1px solid #f0f0ec;border-radius:10px;padding:14px;text-align:center;">
         <div style="font-size:22px;margin-bottom:6px;">${icons[m]}</div>
@@ -3539,6 +3783,7 @@ normalizeCustomerKeys();
 bootstrapMaster();
 bootstrapStoreProducts();
 ensureStoreRows();
+renderHeldBar();
 renderBranding();
 renderCashier();
 applyRoleVisibility();

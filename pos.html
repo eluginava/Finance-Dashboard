@@ -417,6 +417,18 @@
       <div id="channelBreakdown" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;"></div>
     </div>
 
+    <div class="section" id="negStockSection" style="margin-top:16px;display:none;border-color:#f0dcdc;">
+      <div class="section-title">
+        Stok Minus
+        <span class="badge" id="negStockCount">0 produk</span>
+      </div>
+      <p style="font-size:13px;color:#555;line-height:1.6;margin-bottom:12px;">
+        Produk berikut terjual melebihi stok yang tercatat. Stok memang sengaja tidak mengunci penjualan —
+        angka ini hanya penanda supaya bisa disesuaikan di tab Produk.
+      </p>
+      <div id="negStockList" style="overflow-x:auto;"></div>
+    </div>
+
     <div class="section" style="margin-top:16px;">
       <div class="section-title">Metode Pembayaran — Toko (7 hari)</div>
       <div id="methodBreakdown" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;"></div>
@@ -795,7 +807,7 @@ create index if not exists pos_transactions_branch_idx on pos_transactions (bran
 <script>
 // ── DATA ──────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'elva_pos_v1';
-const APP_VERSION = 'v6 · 2026-08-16';   // shown in Profile so the live build is identifiable
+const APP_VERSION = 'v8 · 2026-08-16';   // shown in Profile so the live build is identifiable
 
 const defaultProducts = [
   { id: 1,  name: 'Kopi Susu Gula Aren', emoji: '🧋', cat: 'Minuman', price: 22000, stock: 50 },
@@ -1285,12 +1297,12 @@ function renderFavourites() {
     const inCart = cart.find(c => c.productId === p.id);
     const left = p.stock - (inCart ? inCart.qty : 0);
     const card = document.createElement('button');
-    card.className = 'fav-card' + (left <= 0 ? ' out' : '');
+    card.className = 'fav-card';
     card.innerHTML = `
       ${p.img ? `<img class="fav-thumb" src="${p.img}" alt="">` : `<div class="fav-thumb">${p.emoji || '📦'}</div>`}
       <div style="min-width:0;">
         <div class="fav-name">${esc(p.name)}</div>
-        <div class="fav-price">${fmt(p.price)}${left <= 0 ? ' · habis' : ''}</div>
+        <div class="fav-price">${fmt(p.price)}${left < 0 ? ' · stok ' + left + ' ⚠' : ''}</div>
       </div>`;
     card.onclick = () => addToCart(p.id);
     grid.appendChild(card);
@@ -1319,10 +1331,11 @@ function renderProducts() {
       const inCart = cart.find(c => c.productId === p.id);
       const left = p.stock - (inCart ? inCart.qty : 0);
       let stockClass = '', stockText = 'Stok: ' + left;
-      if (left <= 0) { stockClass = 'empty'; stockText = 'Habis'; }
-      else if (left <= 5) { stockClass = 'low'; stockText = 'Sisa ' + left + '!'; }
+      if (left < 0)       { stockClass = 'empty'; stockText = 'Stok: ' + left + ' ⚠'; }
+      else if (left === 0){ stockClass = 'empty'; stockText = 'Stok: 0'; }
+      else if (left <= 5) { stockClass = 'low';   stockText = 'Sisa ' + left + '!'; }
       const card = document.createElement('div');
-      card.className = 'product-card' + (left <= 0 ? ' out' : '');
+      card.className = 'product-card';   // stok hanya penanda — kartu selalu bisa diklik
       const thumb = p.img
         ? `<img class="product-thumb" src="${p.img}" alt="${esc(p.name)}">`
         : `<div class="product-thumb">${p.emoji}</div>`;
@@ -1353,10 +1366,9 @@ function selectChannel(c) {
 
 // ── KASIR: CART ───────────────────────────────────────────────────────────
 function addToCart(id) {
-  const p = state.products.find(p => p.id === id);
   const item = cart.find(c => c.productId === id);
-  const inCartQty = item ? item.qty : 0;
-  if (inCartQty >= p.stock) return;
+  // Stok sengaja tidak membatasi penjualan: kalau stok telat di-update, kasir
+  // tetap bisa melayani pembeli. Stok hanya penanda, boleh minus.
   if (item) item.qty++;
   else cart.push({ productId: id, qty: 1 });
   renderCart(); renderProducts(); renderFavourites();
@@ -1365,9 +1377,7 @@ function addToCart(id) {
 function changeQty(id, delta) {
   const item = cart.find(c => c.productId === id);
   if (!item) return;
-  const p = state.products.find(p => p.id === id);
   item.qty += delta;
-  if (item.qty > p.stock) item.qty = p.stock;
   if (item.qty <= 0) cart = cart.filter(c => c.productId !== id);
   renderCart(); renderProducts(); renderFavourites();
 }
@@ -1581,7 +1591,7 @@ function confirmPayment() {
   // decrement stock
   cart.forEach(c => {
     const p = state.products.find(p => p.id === c.productId);
-    if (p) { p.stock = Math.max(0, p.stock - c.qty); markProductDirty(p.id); }
+    if (p) { p.stock = p.stock - c.qty; markProductDirty(p.id); }   // boleh minus
   });
   scheduleProductSync();
 
@@ -1597,7 +1607,7 @@ function confirmPayment() {
 }
 
 // ── RECEIPT ───────────────────────────────────────────────────────────────
-function showReceipt(trx) {
+function showReceipt(trx, isReprint) {
   const d = new Date(trx.time);
   const timeStr = d.getDate() + '/' + (d.getMonth()+1) + '/' + d.getFullYear() + ' ' +
     String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
@@ -1633,11 +1643,25 @@ function showReceipt(trx) {
   }
   html += `<div class="r-line"></div>
     <div class="r-center">${esc(state.settings.receiptNote || 'Terima kasih!')}</div>`;
+  if (isReprint) {
+    html += `<div class="r-center r-small" style="margin-top:4px;">— CETAK ULANG${
+      trx.reprintCount > 1 ? ' ke-' + trx.reprintCount : ''} —</div>`;
+  }
   document.getElementById('receiptPrint').innerHTML = html;
   document.getElementById('receiptModal').classList.add('show');
 }
 
 function closeReceipt() { document.getElementById('receiptModal').classList.remove('show'); }
+
+// Cetak ulang struk lama dari Riwayat — printer macet atau pembeli minta lagi.
+function reprintTransaction(i) {
+  const trx = state.transactions[i];
+  if (!trx) return;
+  trx.reprintCount = (trx.reprintCount || 0) + 1;
+  saveData();
+  showReceipt(trx, true);
+  renderHistory();
+}
 
 // Prints on 58mm thermal roll. The receipt is measured at 58mm-equivalent width
 // first, so the @page height matches the content and the printer does not feed
@@ -1781,10 +1805,12 @@ function renderHistory() {
       <div class="trx-head">
         <div>
           <div class="trx-id">${trx.id}</div>
-          <div class="trx-time">${timeStr} · ${trx.items.reduce((s,it)=>s+it.qty,0)} item${refStr}${trx.cashier ? ' · 🧑‍🍳 ' + esc(trx.cashier) : ''}</div>
+          <div class="trx-time">${timeStr} · ${trx.items.reduce((s,it)=>s+it.qty,0)} item${refStr}${trx.cashier ? ' · 🧑‍🍳 ' + esc(trx.cashier) : ''}${trx.reprintCount ? ' · 🖨 ' + trx.reprintCount + 'x' : ''}</div>
         </div>
         <span class="trx-method ${mClass}">${trx.method}</span>
         <div class="trx-total">${fmt(trx.total)}</div>
+        <button class="add-btn" style="font-size:11px;padding:4px 10px;" title="Cetak ulang struk"
+          onclick="event.stopPropagation();reprintTransaction(${i})">🖨</button>
         <button class="del-btn" title="Hapus transaksi ini (salah input)" onclick="event.stopPropagation();voidTransaction(${i})">✕</button>
       </div>
       <div class="trx-detail" id="trxDetail${i}">
@@ -1833,6 +1859,20 @@ function renderReport() {
   document.getElementById('repItems').textContent = todayItems;
 
   document.getElementById('resetCloudNote').style.display = cloudEnabled() ? 'inline' : 'none';
+
+  // Stok minus — hanya pengingat, tidak pernah memblokir penjualan
+  const neg = state.products.filter(p => p.stock < 0).sort((a, b) => a.stock - b.stock);
+  document.getElementById('negStockSection').style.display = neg.length ? '' : 'none';
+  if (neg.length) {
+    document.getElementById('negStockCount').textContent = neg.length + ' produk';
+    document.getElementById('negStockList').innerHTML =
+      '<table><thead><tr><th>Produk</th><th>Kategori</th><th>Stok</th></tr></thead><tbody>' +
+      neg.map(p => `<tr>
+        <td style="font-weight:500;">${esc(p.name)}</td>
+        <td style="color:#888;">${esc(p.cat || '-')}</td>
+        <td style="font-weight:600;color:#c0392b;">${p.stock}</td>
+      </tr>`).join('') + '</tbody></table>';
+  }
 
   // per-cashier totals
   const byCashier = {};

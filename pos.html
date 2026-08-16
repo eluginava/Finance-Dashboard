@@ -284,6 +284,7 @@
   <div class="tabs">
     <button class="tab-btn active" data-page="kasir" onclick="switchPage('kasir')">Kasir</button>
     <button class="tab-btn" data-page="produk" onclick="switchPage('produk')">Produk</button>
+    <button class="tab-btn owner-only" data-page="master" onclick="switchPage('master')">Master</button>
     <button class="tab-btn mgr-only" data-page="pelanggan" onclick="switchPage('pelanggan')">Pelanggan</button>
     <button class="tab-btn" data-page="riwayat" onclick="switchPage('riwayat')">Riwayat</button>
     <button class="tab-btn" data-page="laporan" onclick="switchPage('laporan')">Laporan</button>
@@ -387,6 +388,50 @@
       <div style="margin-top:16px; text-align:right;">
         <button class="add-btn" onclick="addProduct()">+ Tambah Produk</button>
       </div>
+    </div>
+  </div>
+
+  <!-- ═══ MASTER (Owner) ═══ -->
+  <div class="page" id="page-master">
+    <div class="section">
+      <div class="section-title">
+        Kategori
+        <span class="badge" id="catCount">0</span>
+      </div>
+      <p style="font-size:12px;color:#888;line-height:1.6;margin-bottom:12px;">
+        Dua tingkat: <b>Grup</b> (mis. Minuman, Gaun) berisi <b>Kategori</b> (mis. Kopi, Pengantin).
+        Tiap toko otomatis hanya menampilkan kategori dari produk yang dijualnya — toko kopi tidak
+        akan pernah melihat kategori bridal.
+      </p>
+      <div id="categoryTree"></div>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="add-btn" onclick="addCategoryGroup()">+ Tambah Grup</button>
+        <button class="add-btn" onclick="addCategoryChild()">+ Tambah Kategori</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">
+        Master Produk
+        <span class="badge" id="masterCount">0 produk</span>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
+        <input class="tbl-input" type="text" id="masterSearch" placeholder="🔍 Cari produk…" style="flex:1;min-width:180px;" oninput="renderMaster()">
+        <select class="tbl-input" id="masterGroupFilter" style="width:200px;" onchange="renderMaster()"></select>
+      </div>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead><tr><th>Foto</th><th>Nama</th><th>Kategori</th><th>Satuan</th><th>Harga saran</th><th>Varian</th><th>Aktif</th><th></th></tr></thead>
+          <tbody id="masterTableBody"></tbody>
+        </table>
+      </div>
+      <div style="margin-top:12px;">
+        <button class="add-btn" onclick="addMasterProduct()">+ Tambah Produk</button>
+      </div>
+      <p style="font-size:12px;color:#888;line-height:1.6;margin-top:10px;">
+        Nama, kategori, foto, dan satuan diatur di sini untuk semua toko.
+        <b>Harga jual dan stok diatur per toko</b> di tab Produk masing-masing cabang.
+      </p>
     </div>
   </div>
 
@@ -739,6 +784,22 @@
   </div>
 </div>
 
+<!-- ═══ VARIAN PRODUK ═══ -->
+<div class="modal-overlay" id="variantModal">
+  <div class="modal" style="max-width:460px;">
+    <h2 id="variantTitle">Varian</h2>
+    <p style="font-size:12px;color:#888;line-height:1.6;margin-bottom:12px;">
+      Contoh: Hot / Ice, S / M / L, atau ukuran gaun. Tiap varian punya harga &amp; stok sendiri
+      di tiap toko. Produk tanpa varian tetap punya satu varian kosong sebagai bawaan.
+    </p>
+    <div id="variantList"></div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeVariants()">Tutup</button>
+      <button class="btn btn-primary" onclick="addVariant()">+ Tambah Varian</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ DETAIL PELANGGAN ═══ -->
 <div class="modal-overlay" id="custModal">
   <div class="modal" style="max-width:560px;">
@@ -934,7 +995,7 @@ create index if not exists pos_transactions_branch_idx on pos_transactions (bran
 <script>
 // ── DATA ──────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'elva_pos_v1';
-const APP_VERSION = 'v11 · 2026-08-16';   // shown in Profile so the live build is identifiable
+const APP_VERSION = 'v12 · 2026-08-16';   // shown in Profile so the live build is identifiable
 
 const defaultProducts = [
   { id: 1,  name: 'Kopi Susu Gula Aren', emoji: '🧋', cat: 'Minuman', price: 22000, stock: 50 },
@@ -984,6 +1045,9 @@ if (!state.shifts) state.shifts = [];
 if (state.session === undefined) state.session = null;   // { userId, username, name, role, storeId }
 if (!state.users) state.users = [];                      // cache user untuk login offline
 if (!state.activityLog) state.activityLog = [];
+if (!state.categories) state.categories = [];   // 2 level: parentId null = Grup
+if (!state.master) state.master = [];           // master produk lintas toko
+if (!state.variants) state.variants = [];       // varian per produk
 if (!state.deviceId) state.deviceId = 'dev-' + Math.random().toString(36).slice(2, 10);
 if (!state.customers) state.customers = {};   // phone -> { name, visits, spent, lastVisit }
 if (!state.settings.supabaseUrl) state.settings.supabaseUrl = '';
@@ -1448,6 +1512,324 @@ function removeVoucher(i) {
   saveData(); renderVouchers();
 }
 
+// ── MASTER: KATEGORI, PRODUK, VARIAN ──────────────────────────────────────
+// Data master dibentuk dari produk yang sudah ada supaya tidak ada yang hilang
+// saat aplikasi diperbarui. Kasir masih memakai state.products sampai Tahap 5,
+// jadi setiap perubahan master dicerminkan ke sana lewat mirrorMasterToProducts().
+function bootstrapMaster() {
+  if (state.master.length) return;
+  state.categories = [{ id: 1, parentId: null, name: 'Umum', emoji: '📦', sortOrder: 0, active: true }];
+  const cats = [...new Set(state.products.map(p => p.cat).filter(Boolean))];
+  cats.forEach((c, i) => state.categories.push({
+    id: 1001 + i, parentId: 1, name: c, emoji: '', sortOrder: i, active: true,
+  }));
+  state.master = state.products.map(p => ({
+    id: p.id, sku: '', name: p.name,
+    categoryId: (state.categories.find(c => c.parentId && c.name === p.cat) || {}).id || null,
+    emoji: p.emoji || '📦', img: p.img || '', unit: '',
+    defaultPrice: p.price || 0, active: true,
+  }));
+  state.variants = state.master.map(m => ({
+    id: m.id, productId: m.id, name: '', sku: '', sortOrder: 0, active: true,
+  }));
+  saveData();
+}
+
+function catName(id) {
+  const c = state.categories.find(x => x.id === id);
+  if (!c) return '';
+  const parent = c.parentId ? state.categories.find(x => x.id === c.parentId) : null;
+  return parent ? parent.name + ' > ' + c.name : c.name;
+}
+function groups()      { return state.categories.filter(c => !c.parentId); }
+function childrenOf(g) { return state.categories.filter(c => c.parentId === g); }
+function variantsOf(pid) { return state.variants.filter(v => v.productId === pid).sort((a,b)=>a.sortOrder-b.sortOrder); }
+
+// Jembatan ke jalur lama supaya kasir tetap jalan di antara tahap.
+function mirrorMasterToProducts() {
+  state.master.forEach(m => {
+    const p = state.products.find(x => x.id === m.id);
+    if (!p) return;
+    p.name = m.name;
+    p.emoji = m.emoji || '📦';
+    p.cat = (state.categories.find(c => c.id === m.categoryId) || {}).name || p.cat || 'Lainnya';
+    if (m.img) p.img = m.img; else delete p.img;
+    p.unit = m.unit || '';
+    markProductDirty(p.id);
+  });
+  saveData();
+  scheduleProductSync();
+  refreshPos();
+}
+
+// ── Kategori ──
+function renderCategories() {
+  const wrap = document.getElementById('categoryTree');
+  if (!wrap) return;
+  document.getElementById('catCount').textContent =
+    groups().length + ' grup · ' + state.categories.filter(c => c.parentId).length + ' kategori';
+  wrap.innerHTML = groups().length ? groups().map(g => `
+    <div style="border:1px solid #f0f0ec;border-radius:10px;padding:10px 12px;margin-bottom:8px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <input class="tbl-input" type="text" value="${esc(g.emoji || '')}" style="width:44px;text-align:center;" onchange="editCategory(${g.id},'emoji',this.value)">
+        <input class="tbl-input" type="text" value="${esc(g.name)}" style="flex:1;font-weight:600;" onchange="editCategory(${g.id},'name',this.value)">
+        <button class="del-btn" onclick="removeCategory(${g.id})" title="Hapus grup">✕</button>
+      </div>
+      <div style="margin-top:8px;padding-left:14px;border-left:2px solid #f0f0ec;">
+        ${childrenOf(g.id).map(c => `
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <span style="color:#bbb;">└</span>
+            <input class="tbl-input" type="text" value="${esc(c.name)}" style="flex:1;" onchange="editCategory(${c.id},'name',this.value)">
+            <span style="font-size:11px;color:#888;">${state.master.filter(m => m.categoryId === c.id).length} produk</span>
+            <button class="del-btn" onclick="removeCategory(${c.id})" title="Hapus kategori">✕</button>
+          </div>`).join('') || '<div style="font-size:12px;color:#bbb;">belum ada kategori</div>'}
+      </div>
+    </div>`).join('')
+    : '<div style="font-size:13px;color:#bbb;">Belum ada kategori.</div>';
+}
+
+function nextCatId() { return state.categories.reduce((m, c) => Math.max(m, c.id), 0) + 1; }
+
+function addCategoryGroup() {
+  const name = (prompt('Nama Grup baru (mis. Minuman, Gaun):') || '').trim();
+  if (!name) return;
+  state.categories.push({ id: nextCatId(), parentId: null, name, emoji: '', sortOrder: groups().length, active: true });
+  saveData(); logActivity('category_add', 'group', name, {}); renderCategories(); renderMaster(); syncMaster();
+}
+
+function addCategoryChild() {
+  if (!groups().length) { alert('Buat Grup dulu.'); return; }
+  const list = groups().map((g, i) => (i + 1) + '. ' + g.name).join('\n');
+  const pick = parseInt(prompt('Kategori ini masuk Grup mana?\n\n' + list), 10) - 1;
+  const g = groups()[pick];
+  if (!g) return;
+  const name = (prompt('Nama Kategori baru:') || '').trim();
+  if (!name) return;
+  state.categories.push({ id: nextCatId(), parentId: g.id, name, emoji: '', sortOrder: childrenOf(g.id).length, active: true });
+  saveData(); logActivity('category_add', 'category', name, { group: g.name }); renderCategories(); renderMaster(); syncMaster();
+}
+
+function editCategory(id, field, val) {
+  const c = state.categories.find(x => x.id === id);
+  if (!c) return;
+  c[field] = String(val).trim();
+  saveData(); logActivity('category_edit', 'category', c.name, { field });
+  renderCategories(); renderMaster(); mirrorMasterToProducts(); syncMaster();
+}
+
+function removeCategory(id) {
+  const c = state.categories.find(x => x.id === id);
+  if (!c) return;
+  const kids = childrenOf(id);
+  const used = state.master.filter(m => m.categoryId === id || kids.some(k => k.id === m.categoryId));
+  if (used.length) { alert('Masih ada ' + used.length + ' produk memakai kategori ini. Pindahkan dulu.'); return; }
+  if (!confirm('Hapus "' + c.name + '"?' + (kids.length ? ' Termasuk ' + kids.length + ' kategori di dalamnya.' : ''))) return;
+  state.categories = state.categories.filter(x => x.id !== id && x.parentId !== id);
+  saveData(); logActivity('category_delete', 'category', c.name, {}); renderCategories(); renderMaster(); syncMaster();
+}
+
+// ── Master produk ──
+function renderMaster() {
+  const tb = document.getElementById('masterTableBody');
+  if (!tb) return;
+  const q = (document.getElementById('masterSearch').value || '').toLowerCase();
+  const gf = document.getElementById('masterGroupFilter');
+  if (gf && !gf.dataset.filled) {
+    gf.innerHTML = '<option value="">Semua grup</option>' +
+      groups().map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('');
+    gf.dataset.filled = '1';
+  }
+  const gpick = gf ? gf.value : '';
+  const catOptions = m => '<option value="">— tanpa kategori —</option>' + groups().map(g =>
+    `<optgroup label="${esc(g.name)}">` + childrenOf(g.id).map(c =>
+      `<option value="${c.id}" ${m.categoryId === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('') + '</optgroup>').join('');
+
+  const rows = state.master.filter(m => {
+    if (q && !m.name.toLowerCase().includes(q)) return false;
+    if (gpick) {
+      const c = state.categories.find(x => x.id === m.categoryId);
+      if (!c || String(c.parentId) !== String(gpick)) return false;
+    }
+    return true;
+  });
+  document.getElementById('masterCount').textContent = state.master.length + ' produk';
+  tb.innerHTML = rows.map(m => {
+    const i = state.master.indexOf(m);
+    const vs = variantsOf(m.id).filter(v => v.active !== false);
+    const realVariants = vs.filter(v => v.name);
+    return `<tr>
+      <td style="white-space:nowrap;">
+        ${m.img ? `<img src="${m.img}" style="width:56px;height:32px;object-fit:cover;border-radius:5px;vertical-align:middle;">`
+                : `<span style="font-size:18px;">${esc(m.emoji || '📦')}</span>`}
+        <label class="add-btn" style="font-size:11px;padding:3px 7px;cursor:pointer;margin-left:5px;">📷<input type="file" accept="image/*" style="display:none;" onchange="uploadMasterImage(${i}, this)"></label>
+      </td>
+      <td><input class="tbl-input" type="text" value="${esc(m.name)}" style="width:160px;" onchange="editMaster(${i},'name',this.value)"></td>
+      <td><select class="tbl-input" style="width:150px;" onchange="editMaster(${i},'categoryId',this.value)">${catOptions(m)}</select></td>
+      <td><input class="tbl-input" type="text" value="${esc(m.unit || '')}" placeholder="cup/pcs" style="width:70px;" onchange="editMaster(${i},'unit',this.value)"></td>
+      <td><input class="tbl-input" type="number" value="${m.defaultPrice || 0}" step="500" style="width:100px;" onchange="editMaster(${i},'defaultPrice',this.value)"></td>
+      <td><button class="add-btn" style="font-size:11px;padding:4px 10px;" onclick="openVariants(${i})">${realVariants.length ? realVariants.length + ' varian' : '— atur —'}</button></td>
+      <td><select class="tbl-input" style="width:90px;" onchange="editMaster(${i},'active',this.value==='1')">
+        <option value="1" ${m.active!==false?'selected':''}>Aktif</option>
+        <option value="0" ${m.active===false?'selected':''}>Nonaktif</option></select></td>
+      <td><button class="del-btn" onclick="removeMasterProduct(${i})" title="Hapus dari master">✕</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function editMaster(i, field, val) {
+  const m = state.master[i];
+  if (!m) return;
+  if (field === 'categoryId') val = val ? +val : null;
+  if (field === 'defaultPrice') val = Math.max(0, parseFloat(val) || 0);
+  if (typeof val === 'string') val = val.trim();
+  m[field] = val;
+  saveData();
+  logActivity('product_edit', 'product', m.name, { field });
+  renderMaster(); renderCategories(); mirrorMasterToProducts(); syncMaster();
+}
+
+function addMasterProduct() {
+  const name = (prompt('Nama produk baru:') || '').trim();
+  if (!name) return;
+  const id = Math.max(0, ...state.master.map(m => m.id), ...state.products.map(p => p.id)) + 1;
+  state.master.push({ id, sku: '', name, categoryId: null, emoji: '📦', img: '', unit: '', defaultPrice: 0, active: true });
+  state.variants.push({ id, productId: id, name: '', sku: '', sortOrder: 0, active: true });
+  // langsung tersedia di toko ini supaya bisa dijual hari itu juga
+  state.products.push({ id, name, emoji: '📦', cat: 'Lainnya', price: 0, stock: 0 });
+  saveData();
+  logActivity('product_add', 'product', name, {});
+  markProductDirty(id); scheduleProductSync();
+  renderMaster(); refreshPos(); syncMaster();
+}
+
+function removeMasterProduct(i) {
+  const m = state.master[i];
+  if (!m) return;
+  if (!confirm('Hapus "' + m.name + '" dari master?\n\nProduk juga hilang dari daftar jual toko ini.')) return;
+  state.master.splice(i, 1);
+  state.variants = state.variants.filter(v => v.productId !== m.id);
+  const pi = state.products.findIndex(p => p.id === m.id);
+  if (pi >= 0) state.products.splice(pi, 1);
+  cart = cart.filter(c => c.productId !== m.id);
+  saveData();
+  logActivity('product_delete', 'product', m.name, {});
+  renderMaster(); refreshPos(); syncMaster();
+  if (cloudEnabled()) sbFetch('/rest/v1/products?id=eq.' + m.id, { method: 'DELETE' }).catch(() => {});
+}
+
+function uploadMasterImage(i, input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 640;
+      const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      state.master[i].img = canvas.toDataURL('image/jpeg', 0.78);
+      saveData();
+      logActivity('product_edit', 'product', state.master[i].name, { field: 'img' });
+      renderMaster(); mirrorMasterToProducts(); syncMaster();
+    };
+    img.onerror = () => alert('File itu tidak bisa dibaca sebagai gambar.');
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// ── Varian ──
+let variantProductIdx = null;
+function openVariants(i) {
+  variantProductIdx = i;
+  const m = state.master[i];
+  document.getElementById('variantTitle').textContent = 'Varian — ' + m.name;
+  renderVariants();
+  document.getElementById('variantModal').classList.add('show');
+}
+function closeVariants() { document.getElementById('variantModal').classList.remove('show'); }
+
+function renderVariants() {
+  const m = state.master[variantProductIdx];
+  const vs = variantsOf(m.id);
+  document.getElementById('variantList').innerHTML = vs.map(v => {
+    const idx = state.variants.indexOf(v);
+    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+      <input class="tbl-input" type="text" value="${esc(v.name)}" placeholder="(varian bawaan)" style="flex:1;" onchange="editVariant(${idx},'name',this.value)">
+      <select class="tbl-input" style="width:100px;" onchange="editVariant(${idx},'active',this.value==='1')">
+        <option value="1" ${v.active!==false?'selected':''}>Aktif</option>
+        <option value="0" ${v.active===false?'selected':''}>Nonaktif</option>
+      </select>
+      ${vs.length > 1 ? `<button class="del-btn" onclick="removeVariant(${idx})" title="Hapus varian">✕</button>` : '<span style="width:18px;"></span>'}
+    </div>`;
+  }).join('');
+}
+
+function addVariant() {
+  const m = state.master[variantProductIdx];
+  const name = (prompt('Nama varian (mis. Hot, Ice, S, M, L):') || '').trim();
+  if (!name) return;
+  const id = Math.max(0, ...state.variants.map(v => v.id)) + 1;
+  state.variants.push({ id, productId: m.id, name, sku: '', sortOrder: variantsOf(m.id).length, active: true });
+  saveData();
+  logActivity('variant_change', 'product', m.name, { add: name });
+  renderVariants(); renderMaster(); syncMaster();
+}
+
+function editVariant(idx, field, val) {
+  const v = state.variants[idx];
+  if (!v) return;
+  v[field] = typeof val === 'string' ? val.trim() : val;
+  saveData();
+  logActivity('variant_change', 'product', v.productId, { field });
+  renderVariants(); renderMaster(); syncMaster();
+}
+
+function removeVariant(idx) {
+  const v = state.variants[idx];
+  if (!v) return;
+  if (variantsOf(v.productId).length <= 1) { alert('Produk harus punya minimal satu varian.'); return; }
+  if (!confirm('Hapus varian "' + (v.name || 'bawaan') + '"?')) return;
+  state.variants.splice(idx, 1);
+  saveData();
+  logActivity('variant_change', 'product', v.productId, { remove: v.name });
+  renderVariants(); renderMaster(); syncMaster();
+}
+
+// Master, kategori, dan varian global lintas toko — tidak di-scope per toko.
+async function syncMaster() {
+  if (!cloudEnabled()) return;
+  const push = async (table, rows, conflict) => {
+    if (!rows.length) return;
+    try {
+      await sbFetch('/rest/v1/' + table + '?on_conflict=' + conflict, {
+        method: 'POST',
+        headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify(rows),
+      });
+    } catch (e) {}
+  };
+  await push('categories', state.categories.map(c => ({
+    id: c.id, parent_id: c.parentId, name: c.name, emoji: c.emoji || '',
+    sort_order: c.sortOrder || 0, active: c.active !== false,
+  })), 'id');
+  await push('products', state.master.map(m => ({
+    id: m.id, sku: m.sku || '', name: m.name, category_id: m.categoryId,
+    emoji: m.emoji || '', img: m.img || null, unit: m.unit || '',
+    default_price: m.defaultPrice || 0, active: m.active !== false,
+    updated_at: new Date().toISOString(),
+  })), 'id');
+  await push('product_variants', state.variants.map(v => ({
+    id: v.id, product_id: v.productId, name: v.name || '', sku: v.sku || '',
+    sort_order: v.sortOrder || 0, active: v.active !== false,
+  })), 'id');
+}
+
 // ── PELANGGAN / MEMBER ────────────────────────────────────────────────────
 // Nomor yang sama sering diketik berbeda-beda (+62, 62, spasi, strip).
 // Semua dinormalisasi ke bentuk 08xxxx supaya satu orang = satu baris member.
@@ -1790,6 +2172,9 @@ function endShift() {
 if (state.session === undefined) state.session = null;   // { userId, username, name, role, storeId }
 if (!state.users) state.users = [];                      // cache user untuk login offline
 if (!state.activityLog) state.activityLog = [];
+if (!state.categories) state.categories = [];   // 2 level: parentId null = Grup
+if (!state.master) state.master = [];           // master produk lintas toko
+if (!state.variants) state.variants = [];       // varian per produk
 if (!state.deviceId) state.deviceId = 'dev-' + Math.random().toString(36).slice(2, 10);
     state.shifts.unshift({
       cashier: state.cashier, branch: branchKey(),
@@ -1843,6 +2228,7 @@ function switchPage(name) {
   const btn = document.querySelector('.tab-btn[data-page="' + name + '"]');
   if (btn) btn.classList.add('active');          // 'profil' opens from the avatar, not a tab
   if (name === 'profil') { renderBranding(); renderCashier(); renderBranchInputs(); renderVouchers(); renderCustomers(); renderShiftLog(); renderUsers(); renderActivityLog(); applyRoleVisibility(); }
+  if (name === 'master') { renderCategories(); renderMaster(); }
   if (name === 'pelanggan') renderCustomerPage();
   if (name === 'produk') renderProductTable();
   if (name === 'riwayat') renderHistory();
@@ -2228,7 +2614,8 @@ function showReceipt(trx, isReprint) {
   }
   html += `<div class="r-line"></div>`;
   trx.items.forEach(it => {
-    html += `<div class="r-row"><span>${esc(it.name)} x${it.qty}</span><span>${fmt(it.price * it.qty)}</span></div>`;
+    const u = (state.master.find(m => m.name === it.name) || {}).unit;
+    html += `<div class="r-row"><span>${esc(it.name)} x${it.qty}${u ? ' ' + esc(u) : ''}</span><span>${fmt(it.price * it.qty)}</span></div>`;
   });
   html += `<div class="r-line"></div>
     <div class="r-row"><span>Subtotal</span><span>${fmt(trx.subtotal)}</span></div>`;
@@ -2984,6 +3371,7 @@ function exportCSV() {
 // ── INIT ──────────────────────────────────────────────────────────────────
 document.getElementById('appVersion').textContent = APP_VERSION;
 normalizeCustomerKeys();
+bootstrapMaster();
 renderBranding();
 renderCashier();
 applyRoleVisibility();

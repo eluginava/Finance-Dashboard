@@ -465,6 +465,10 @@
         <div style="font-size:12px;color:#888;margin-bottom:6px;">Daftar kasir tersimpan</div>
         <div id="cashierList" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
       </div>
+      <div style="margin-top:16px;">
+        <div style="font-size:12px;color:#888;margin-bottom:6px;">Riwayat shift (check-in / check-out)</div>
+        <div id="shiftLog" style="overflow-x:auto;"></div>
+      </div>
       <p style="font-size:12px;color:#888;line-height:1.6;margin-top:12px;">
         Setiap transaksi dicatat atas nama kasir yang sedang bertugas, dan bisa dilihat di Riwayat, struk, laporan, serta file CSV.
       </p>
@@ -495,6 +499,9 @@
         </div>
       </div>
       <p style="font-size:12px;color:#888;line-height:1.6;margin-top:12px;">
+        <b>Untuk banyak toko:</b> isi nama cabang berbeda di tiap perangkat (mis. "Cabang A", "Cabang B").
+        Produk, stok, dan laporan tiap cabang otomatis terpisah walau semuanya memakai satu akun Supabase,
+        dan PIN manajemen diatur sendiri-sendiri di tiap perangkat — jadi staff cabang A tidak bisa membuka pengaturan cabang B.
         Nama cabang ikut tercetak di struk dan tersimpan di tiap transaksi, jadi kalau ada komplain ketahuan dari cabang mana.
         Di Laporan ada filter cabang supaya angka tiap toko tidak tercampur.
         PB1 otomatis aktif untuk pembelian <b>Toko</b>, dan tidak dikenakan untuk GoFood/GrabFood.
@@ -542,7 +549,8 @@
       </div>
       <p style="font-size:13px;color:#555;line-height:1.6;margin-bottom:12px;">
         <b>Kasir</b> hanya bisa melayani penjualan, melihat &amp; membetulkan orderan.
-        <b>Manajemen</b> (pakai PIN) bisa ubah harga, nama menu, tambah produk, atur cabang, voucher, dan reset data.
+        <b>Manajemen</b> (pakai PIN) bisa ubah harga, nama menu, tambah produk, atur cabang, voucher, dan reset data.<br>
+        <b>PIN disimpan per perangkat</b>, jadi tiap cabang punya PIN sendiri — staff cabang A tidak bisa membuka pengaturan cabang B.
       </p>
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
         <button class="add-btn" id="mgrUnlockBtn" onclick="unlockManager()">🔓 Masuk Mode Manajemen</button>
@@ -673,6 +681,14 @@
     <input class="txt" type="text" id="sbUrl" placeholder="https://xxxxx.supabase.co">
     <label>Anon / Public Key</label>
     <input class="txt" type="text" id="sbKey" placeholder="eyJhbGciOi...">
+    <div style="background:#f5f5f3;border-radius:8px;padding:10px 12px;font-size:12px;color:#555;line-height:1.6;margin-bottom:10px;">
+      🏬 Cabang perangkat ini: <b id="cloudBranchLabel">—</b><br>
+      Produk, stok, dan laporan cabang ini terpisah dari cabang lain walau memakai satu Supabase.
+      <label style="display:block;margin-top:8px;">
+        <input type="checkbox" id="pullAllBranches" style="accent-color:#27ae60;vertical-align:middle;">
+        Tarik data <b>semua cabang</b> (untuk owner / rekap pusat)
+      </label>
+    </div>
     <div id="cloudStatus" style="font-size:13px;line-height:1.6;margin-bottom:8px;"></div>
     <div class="modal-actions" style="margin-top:8px;">
       <button class="btn btn-cancel" onclick="closeCloud()">Tutup</button>
@@ -717,7 +733,9 @@ create policy "pos_anon_delete" on pos_transactions
   for delete to anon using (true);
 
 create table if not exists pos_products (
-  id bigint primary key,
+  pkey text primary key,
+  branch text,
+  id bigint,
   name text,
   cat text,
   emoji text,
@@ -743,7 +761,18 @@ alter table pos_transactions add column if not exists branch text;
 alter table pos_transactions add column if not exists cust_name text;
 alter table pos_transactions add column if not exists cust_phone text;
 alter table pos_transactions add column if not exists voucher text;
-alter table pos_products add column if not exists fav boolean;</textarea>
+alter table pos_products add column if not exists fav boolean;
+
+-- MULTI-CABANG: tiap toko punya baris produk & stok sendiri.
+-- Jalankan blok ini kalau tabel pos_products dibuat sebelum fitur cabang.
+alter table pos_products add column if not exists branch text;
+alter table pos_products add column if not exists pkey text;
+update pos_products set branch = '(default)' where branch is null;
+update pos_products set pkey = branch || ':' || id where pkey is null;
+alter table pos_products drop constraint if exists pos_products_pkey;
+alter table pos_products add primary key (pkey);
+create index if not exists pos_products_branch_idx on pos_products (branch);
+create index if not exists pos_transactions_branch_idx on pos_transactions (branch);</textarea>
       <p style="font-size:11px;color:#999;line-height:1.6;margin-top:8px;">
         ⚠️ Anon key ini memberi akses baca/tulis tabel transaksi — jangan bagikan link aplikasi + key ke orang luar.
       </p>
@@ -812,6 +841,7 @@ if (!state.settings.branchAddress) state.settings.branchAddress = '';
 if (!state.settings.receiptNote) state.settings.receiptNote = 'Terima kasih! 🙏';
 if (state.settings.managerPin === undefined) state.settings.managerPin = '';    // '' = no lock yet
 if (!state.vouchers) state.vouchers = [];
+if (!state.shifts) state.shifts = [];
 if (!state.customers) state.customers = {};   // phone -> { name, visits, spent, lastVisit }
 if (!state.settings.supabaseUrl) state.settings.supabaseUrl = '';
 if (!state.settings.supabaseKey) state.settings.supabaseKey = '';
@@ -897,7 +927,18 @@ function saveStoreName(v) {
 // ── BRANCH / RECEIPT SETTINGS ─────────────────────────────────────────────
 function saveBranch() {
   const g = id => document.getElementById(id);
-  state.settings.branchName = g('branchNameInput').value.trim();
+  const newBranch = g('branchNameInput').value.trim();
+  // Renaming the branch re-keys this device's cloud rows, so the old branch's
+  // products stay behind in Supabase. Warn before that happens by accident.
+  if (newBranch !== state.settings.branchName && cloudEnabled() && state.transactions.length) {
+    if (!confirm('Ganti nama cabang dari "' + branchKey() + '" ke "' + (newBranch || '(default)') + '"?\n\n' +
+                 'Transaksi lama tetap tercatat atas cabang lama, dan produk/stok cabang baru mulai terpisah sendiri.\n' +
+                 'Ubah hanya kalau perangkat ini memang pindah toko.')) {
+      g('branchNameInput').value = state.settings.branchName;
+      return;
+    }
+  }
+  state.settings.branchName = newBranch;
   state.settings.branchPhone = g('branchPhoneInput').value.trim();
   state.settings.branchAddress = g('branchAddressInput').value.trim();
   state.settings.receiptNote = g('receiptNoteInput').value.trim() || 'Terima kasih! 🙏';
@@ -1104,13 +1145,81 @@ function startShift() {
   closeShift();
 }
 
+// Check-out: totals up everything rung up since check-in, so the drawer can be
+// counted and handed over before the next cashier starts.
+function shiftSummary() {
+  if (!state.shiftStart) return null;
+  const from = new Date(state.shiftStart);
+  const mine = state.transactions.filter(t =>
+    t.cashier === state.cashier && new Date(t.time) >= from && (t.branch || branchKey()) === branchKey());
+  const sum = (f) => mine.reduce((s, t) => s + f(t), 0);
+  return {
+    from, count: mine.length,
+    total: sum(t => t.total),
+    cash: sum(t => t.method === 'Tunai' ? t.total : 0),
+    qris: sum(t => t.method === 'QRIS' ? t.total : 0),
+    card: sum(t => t.method === 'Kartu' ? t.total : 0),
+    online: sum(t => isOnlineChannel(t.channel) ? t.total : 0),
+    items: sum(t => t.items.reduce((a, it) => a + it.qty, 0)),
+  };
+}
+
 function endShift() {
   if (!state.cashier) { alert('Belum ada kasir yang bertugas.'); return; }
-  if (!confirm('Akhiri shift ' + state.cashier + '?')) return;
+  const s = shiftSummary();
+  const dur = s ? Math.round((Date.now() - s.from) / 60000) : 0;
+  const hh = Math.floor(dur / 60), mm = dur % 60;
+  const lines = [
+    'Tutup shift ' + state.cashier + ' — ' + branchKey(),
+    '',
+    'Mulai   : ' + (s ? s.from.toLocaleTimeString('id-ID', {hour:'2-digit',minute:'2-digit'}) : '-'),
+    'Durasi  : ' + hh + ' jam ' + mm + ' menit',
+    'Transaksi: ' + (s ? s.count : 0) + ' (' + (s ? s.items : 0) + ' item)',
+    '',
+    'Tunai   : ' + fmt(s ? s.cash : 0) + '   <- uang di laci',
+    'QRIS    : ' + fmt(s ? s.qris : 0),
+    'Kartu   : ' + fmt(s ? s.card : 0),
+    'Online  : ' + fmt(s ? s.online : 0),
+    'TOTAL   : ' + fmt(s ? s.total : 0),
+    '',
+    'Akhiri shift sekarang?',
+  ];
+  if (!confirm(lines.join('\n'))) return;
+
+  if (s) {
+    if (!state.shifts) state.shifts = [];
+    state.shifts.unshift({
+      cashier: state.cashier, branch: branchKey(),
+      start: state.shiftStart, end: new Date().toISOString(),
+      count: s.count, items: s.items, total: s.total,
+      cash: s.cash, qris: s.qris, card: s.card, online: s.online,
+    });
+    state.shifts = state.shifts.slice(0, 200);
+  }
   state.cashier = '';
   state.shiftStart = '';
   saveData();
   renderCashier();
+  renderShiftLog();
+}
+
+function renderShiftLog() {
+  const wrap = document.getElementById('shiftLog');
+  if (!wrap) return;
+  const rows = (state.shifts || []).slice(0, 20);
+  wrap.innerHTML = rows.length
+    ? '<table><thead><tr><th>Kasir</th><th>Cabang</th><th>Masuk</th><th>Keluar</th><th>Trx</th><th>Tunai</th><th>Total</th></tr></thead><tbody>' +
+      rows.map(r => {
+        const t = d => new Date(d).toLocaleString('id-ID', {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
+        return `<tr>
+          <td style="font-weight:500;">${esc(r.cashier)}</td>
+          <td style="color:#888;">${esc(r.branch || '-')}</td>
+          <td>${t(r.start)}</td><td>${t(r.end)}</td>
+          <td>${r.count}</td><td>${fmt(r.cash)}</td>
+          <td style="font-weight:600;">${fmt(r.total)}</td>
+        </tr>`;
+      }).join('') + '</tbody></table>'
+    : '<div style="font-size:13px;color:#bbb;">Belum ada shift yang ditutup.</div>';
 }
 
 function removeCashier(name) {
@@ -1126,7 +1235,7 @@ function switchPage(name) {
   document.getElementById('page-' + name).classList.add('active');
   const btn = document.querySelector('.tab-btn[data-page="' + name + '"]');
   if (btn) btn.classList.add('active');          // 'profil' opens from the avatar, not a tab
-  if (name === 'profil') { renderBranding(); renderCashier(); renderBranchInputs(); renderVouchers(); renderCustomers(); applyRoleVisibility(); }
+  if (name === 'profil') { renderBranding(); renderCashier(); renderBranchInputs(); renderVouchers(); renderCustomers(); renderShiftLog(); applyRoleVisibility(); }
   if (name === 'produk') renderProductTable();
   if (name === 'riwayat') renderHistory();
   if (name === 'laporan') renderReport();
@@ -1452,7 +1561,7 @@ function confirmPayment() {
     channel: channel, ref: online ? document.getElementById('refInput').value.trim() : '',
     commission: 0, net: t.total,
     cashier: state.cashier,
-    branch: state.settings.branchName || '',
+    branch: branchKey(),
     custName: custName, custPhone: custPhone,
     voucher: activeVoucher ? activeVoucher.code : '', voucherCut: t.voucherCut || 0,
   };
@@ -1599,7 +1708,7 @@ async function removeProduct(i) {
   renderProductTable();
   refreshPos();
   if (cloudEnabled()) {
-    try { await sbFetch('/rest/v1/pos_products?id=eq.' + id, { method: 'DELETE' }); } catch (e) {}
+    try { await sbFetch('/rest/v1/pos_products?pkey=eq.' + encodeURIComponent(branchKey() + ':' + id), { method: 'DELETE' }); } catch (e) {}
   }
 }
 
@@ -1840,6 +1949,9 @@ function resetAll() {
     nextTrxNum: 1,
     unsynced: [],
     unsyncedProducts: [],
+    shifts: state.shifts || [],
+    customers: state.customers || {},
+    vouchers: state.vouchers || [],
     settings: keepSettings,
     cashier: state.cashier,          // the person on shift stays logged in
     shiftStart: state.shiftStart,
@@ -1927,7 +2039,7 @@ function trxToRow(t) {
   return {
     uid: t.uid, trx_id: t.id, time: t.time,
     channel: t.channel || 'Toko', method: t.method, ref: t.ref || '', cashier: t.cashier || '',
-    branch: t.branch || '', cust_name: t.custName || '', cust_phone: t.custPhone || '', voucher: t.voucher || '',
+    branch: t.branch || branchKey(), cust_name: t.custName || '', cust_phone: t.custPhone || '', voucher: t.voucher || '',
     subtotal: t.subtotal, discount: t.discount, tax: t.tax, total: t.total,
     commission: t.commission || 0, net: t.net != null ? t.net : t.total,
     items: t.items,
@@ -1958,8 +2070,14 @@ async function syncNow() {
 }
 
 // ── PRODUCT SYNC ──────────────────────────────────────────────────────────
+function branchKey() { return state.settings.branchName || '(default)'; }
+
+// Each store keeps its own row per product, so stock and prices never leak
+// between branches even though all stores share one Supabase project.
 function productToRow(p) {
   return {
+    pkey: branchKey() + ':' + p.id,
+    branch: branchKey(),
     id: p.id, name: p.name, cat: p.cat, emoji: p.emoji || '📦',
     price: p.price, stock: p.stock, img: p.img || null, fav: !!p.fav,
     updated_at: new Date().toISOString(),
@@ -1982,7 +2100,7 @@ async function syncProducts() {
   const rows = state.products.filter(p => state.unsyncedProducts.includes(p.id)).map(productToRow);
   if (rows.length === 0) { state.unsyncedProducts = []; saveData(); updateCloudBadge(); return; }
   try {
-    const res = await sbFetch('/rest/v1/pos_products?on_conflict=id', {
+    const res = await sbFetch('/rest/v1/pos_products?on_conflict=pkey', {
       method: 'POST',
       headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
       body: JSON.stringify(rows),
@@ -2017,7 +2135,7 @@ async function cloudPull() {
   // products first, so pulled transactions line up with the right menu
   let prodMsg = '';
   try {
-    const pres = await sbFetch('/rest/v1/pos_products?select=*&order=id');
+    const pres = await sbFetch('/rest/v1/pos_products?select=*&branch=eq.' + encodeURIComponent(branchKey()) + '&order=id');
     if (pres.ok) {
       const prows = await pres.json();
       let pAdded = 0, pUpdated = 0;
@@ -2036,7 +2154,10 @@ async function cloudPull() {
   } catch (e) { /* products are optional — carry on to transactions */ }
 
   try {
-    const res = await sbFetch('/rest/v1/pos_transactions?select=*&order=time.desc&limit=5000');
+    // A store pulls only its own sales unless the owner asks for every branch.
+    const scope = document.getElementById('pullAllBranches') && document.getElementById('pullAllBranches').checked
+      ? '' : '&branch=eq.' + encodeURIComponent(branchKey());
+    const res = await sbFetch('/rest/v1/pos_transactions?select=*&order=time.desc&limit=5000' + scope);
     if (!res.ok) throw new Error(res.status);
     const rows = await res.json();
     const known = new Set(state.transactions.map(t => t.uid).filter(Boolean));
@@ -2074,6 +2195,7 @@ async function cloudPushProducts() {
 }
 
 function openCloud() {
+  document.getElementById('cloudBranchLabel').textContent = branchKey();
   document.getElementById('sbUrl').value = state.settings.supabaseUrl;
   document.getElementById('sbKey').value = state.settings.supabaseKey;
   document.getElementById('cloudStatus').textContent = '';
@@ -2099,7 +2221,7 @@ async function saveCloudSettings() {
       // cloud is still empty. Otherwise the user chooses: pull down, or push over.
       let cloudCount = 0;
       try {
-        const pr = await sbFetch('/rest/v1/pos_products?select=id');
+        const pr = await sbFetch('/rest/v1/pos_products?select=id&branch=eq.' + encodeURIComponent(branchKey()));
         if (pr.ok) cloudCount = (await pr.json()).length;
       } catch (e) {}
 

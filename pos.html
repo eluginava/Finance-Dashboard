@@ -709,6 +709,29 @@
       <button class="btn btn-primary" onclick="saveCloudSettings()">Simpan &amp; Tes</button>
     </div>
     <details style="margin-top:16px;">
+      <summary style="font-size:13px;font-weight:600;cursor:pointer;color:#555;">🏬 Skema multi-toko (untuk fitur login &amp; master produk)</summary>
+      <p style="font-size:12px;color:#555;line-height:1.7;margin:10px 0;">
+        Skema ini membuat tabel <b>stores, users, categories, products, product_variants,
+        store_products, customers, shifts, transactions, cash_movements, activity_log,
+        vouchers</b> sekaligus <b>memindahkan data lama</b> (produk, harga &amp; stok per cabang,
+        transaksi, dan member) ke struktur baru.
+        Tabel lama tidak dihapus, jadi tetap ada cadangan.
+        Aman dijalankan ulang.
+      </p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+        <button class="add-btn" style="font-size:12px;padding:5px 12px;" onclick="loadSchemaSql()">Tampilkan SQL</button>
+        <button class="add-btn" style="font-size:12px;padding:5px 12px;" onclick="copySchemaSql()">Salin ke clipboard</button>
+      </div>
+      <textarea class="sql" id="schemaSql" readonly style="height:180px;" onclick="this.select()"
+        placeholder="Tekan &quot;Tampilkan SQL&quot; untuk memuat skema…"></textarea>
+      <p style="font-size:11px;color:#888;line-height:1.6;margin-top:8px;">
+        Jalankan di Supabase → SQL Editor → Run. Setelah itu akan ada user awal:
+        <b>owner</b>, serta <b>manager-&lt;kode&gt;</b> dan <b>kasir-&lt;kode&gt;</b> untuk tiap cabang —
+        semuanya PIN <b>1234</b> dan wajib diganti setelah login pertama.
+      </p>
+    </details>
+
+    <details style="margin-top:16px;">
       <summary style="font-size:13px;font-weight:600;cursor:pointer;color:#555;">Cara setup Supabase (sekali saja)</summary>
       <ol style="font-size:12px;color:#555;line-height:1.8;margin:10px 0 10px 18px;">
         <li>Buat akun gratis di <b>supabase.com</b> → New Project</li>
@@ -807,7 +830,7 @@ create index if not exists pos_transactions_branch_idx on pos_transactions (bran
 <script>
 // ── DATA ──────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'elva_pos_v1';
-const APP_VERSION = 'v8 · 2026-08-16';   // shown in Profile so the live build is identifiable
+const APP_VERSION = 'v9 · 2026-08-16';   // shown in Profile so the live build is identifiable
 
 const defaultProducts = [
   { id: 1,  name: 'Kopi Susu Gula Aren', emoji: '🧋', cat: 'Minuman', price: 22000, stock: 50 },
@@ -2296,6 +2319,39 @@ function updateCloudBadge() {
   if (!cloudEnabled()) { b.className = 'cloud-badge'; b.textContent = '☁️ off'; }
   else if (state.unsynced.length + state.unsyncedProducts.length > 0) { b.className = 'cloud-badge pending'; b.textContent = '☁️ ' + (state.unsynced.length + state.unsyncedProducts.length) + ' antre'; }
   else { b.className = 'cloud-badge on'; b.textContent = '☁️ sinkron'; }
+}
+
+// ── SKEMA MULTI-TOKO ──────────────────────────────────────────────────────
+// File SQL ada di sebelah index.html, jadi tidak perlu ditanam di dalam HTML.
+let schemaSqlCache = '';
+async function loadSchemaSql() {
+  const box = document.getElementById('schemaSql');
+  if (schemaSqlCache) { box.value = schemaSqlCache; return schemaSqlCache; }
+  box.value = 'Memuat…';
+  try {
+    const res = await fetch('supabase-schema.sql', { cache: 'no-cache' });
+    if (!res.ok) throw new Error(res.status);
+    schemaSqlCache = await res.text();
+    box.value = schemaSqlCache;
+    return schemaSqlCache;
+  } catch (e) {
+    box.value = 'Gagal memuat supabase-schema.sql.\n\n' +
+      'Pastikan file itu ikut diupload ke public_html bersama index.html, ' +
+      'atau ambil dari repositori GitHub.';
+    return '';
+  }
+}
+
+async function copySchemaSql() {
+  const sql = await loadSchemaSql();
+  if (!sql) return;
+  try {
+    await navigator.clipboard.writeText(sql);
+    alert('SQL skema tersalin. Tempel di Supabase → SQL Editor → Run.');
+  } catch (e) {
+    document.getElementById('schemaSql').select();
+    alert('Tidak bisa menyalin otomatis. SQL sudah dipilih — tekan Ctrl+C / Cmd+C.');
+  }
 }
 
 // ── CSV EXPORT ────────────────────────────────────────────────────────────

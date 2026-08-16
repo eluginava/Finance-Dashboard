@@ -29,6 +29,24 @@
   .profile-btn { width: 34px; height: 34px; border-radius: 50%; border: 1px solid #e5e5e0; background: #1a1a1a; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
   .profile-btn:hover { opacity: 0.85; }
 
+  /* Layar login */
+  .login-overlay { position: fixed; inset: 0; background: #f5f5f3; z-index: 200; display: none; align-items: center; justify-content: center; padding: 20px; }
+  .login-overlay.show { display: flex; }
+  .login-card { background: #fff; border: 1px solid #e5e5e0; border-radius: 14px; padding: 32px 28px; width: 100%; max-width: 360px; }
+  .login-card h2 { font-size: 20px; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+  .login-card .sub { font-size: 13px; color: #888; margin-bottom: 20px; }
+  .login-card label { font-size: 12px; color: #888; display: block; margin-bottom: 6px; }
+  .login-card input { width: 100%; border: 1px solid #e5e5e0; border-radius: 8px; padding: 11px 14px; font-size: 15px; background: #fafafa; outline: none; font-family: inherit; margin-bottom: 14px; }
+  .login-card input:focus { border-color: #999; background: #fff; }
+  .login-card .btn-login { width: 100%; background: #1a1a1a; color: #fff; border: none; border-radius: 10px; padding: 13px; font-size: 15px; font-weight: 600; cursor: pointer; font-family: inherit; }
+  .login-card .btn-login:disabled { background: #ccc; cursor: not-allowed; }
+  .login-err { font-size: 13px; color: #c0392b; min-height: 18px; margin-bottom: 8px; }
+  .login-hint { font-size: 12px; color: #888; line-height: 1.6; margin-top: 16px; padding-top: 14px; border-top: 1px solid #f0f0ec; }
+  .role-pill { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 20px; background: #f5f5f3; color: #555; border: 1px solid #e5e5e0; }
+  .role-owner { background: #f3e5f5; color: #7b1fa2; border-color: #e1bee7; }
+  .role-manager { background: #e3f2fd; color: #1565c0; border-color: #bbdefb; }
+  .role-kasir { background: #e8f5e9; color: #2e7d32; border-color: #c8e6c9; }
+
   .cashier-bar { background: #fff; border: 1px solid #e5e5e0; border-radius: 10px; padding: 10px 16px; margin-bottom: 14px; display: flex; align-items: center; gap: 10px; font-size: 13px; }
   .cashier-bar .who { font-weight: 600; }
   .cashier-bar .swap { margin-left: auto; font-size: 12px; padding: 5px 12px; border: 1px solid #e5e5e0; background: #fafafa; border-radius: 8px; cursor: pointer; color: #555; font-family: inherit; }
@@ -555,21 +573,49 @@
 
     <div class="section">
       <div class="section-title">
-        Hak Akses
+        Akun &amp; Hak Akses
         <span class="badge" id="roleBadge">—</span>
         <span class="badge" id="versionBadge" style="margin-left:auto;"></span>
       </div>
       <p style="font-size:13px;color:#555;line-height:1.6;margin-bottom:12px;">
-        <b>Kasir</b> hanya bisa melayani penjualan, melihat &amp; membetulkan orderan.
-        <b>Manajemen</b> (pakai PIN) bisa ubah harga, nama menu, tambah produk, atur cabang, voucher, dan reset data.<br>
-        <b>PIN disimpan per perangkat</b>, jadi tiap cabang punya PIN sendiri — staff cabang A tidak bisa membuka pengaturan cabang B.
+        Masuk sebagai <b id="sessionWho">—</b>.<br>
+        <b>Kasir</b> hanya melayani penjualan &amp; membetulkan orderan.
+        <b>Manager</b> menambah pengaturan toko, harga, stok, dan voucher.
+        <b>Owner</b> mengelola akun, semua toko, dan master produk.
       </p>
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
-        <button class="add-btn" id="mgrUnlockBtn" onclick="unlockManager()">🔓 Masuk Mode Manajemen</button>
-        <button class="add-btn" id="mgrLockBtn" onclick="lockManager()" style="display:none;">🔒 Kunci Lagi (mode kasir)</button>
-        <button class="add-btn" onclick="setManagerPin()">Atur / Ganti PIN</button>
+        <button class="add-btn" onclick="doLogout()">🚪 Keluar / Ganti Kasir</button>
+        <button class="add-btn" onclick="changeOwnPin()">Ganti PIN Saya</button>
       </div>
-      <p style="font-size:12px;color:#e65100;line-height:1.6;margin-top:10px;" id="pinWarn"></p>
+    </div>
+
+    <div class="section owner-only">
+      <div class="section-title">
+        Kelola Akun
+        <span class="badge" id="userCount">0 akun</span>
+      </div>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead><tr><th>Nama</th><th>Username</th><th>Role</th><th>Toko</th><th>Aktif</th><th></th></tr></thead>
+          <tbody id="userTableBody"></tbody>
+        </table>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="add-btn" onclick="addUser()">+ Tambah Akun</button>
+        <button class="add-btn" onclick="resetUserPin()">Reset PIN Akun</button>
+      </div>
+      <p style="font-size:12px;color:#888;line-height:1.6;margin-top:10px;">
+        Kosongkan kolom Toko untuk Owner (akses semua toko). Kasir &amp; Manager wajib diisi kode tokonya.
+        PIN baru selalu diminta saat menambah akun atau menekan Reset PIN.
+      </p>
+    </div>
+
+    <div class="section mgr-only">
+      <div class="section-title">
+        Log Aktivitas
+        <span class="badge">50 terakhir</span>
+      </div>
+      <div id="activityLog" style="overflow-x:auto;"></div>
     </div>
 
     <div class="section">
@@ -660,6 +706,23 @@
       <button class="btn btn-cancel" onclick="closePayment()">Batal</button>
       <button class="btn btn-primary" id="confirmPayBtn" onclick="confirmPayment()">Selesaikan</button>
     </div>
+  </div>
+</div>
+
+<!-- ═══ LOGIN ═══ -->
+<div class="login-overlay" id="loginOverlay">
+  <div class="login-card">
+    <h2><span id="loginLogo">🏪</span> <span id="loginStoreName">MUGI POS</span></h2>
+    <div class="sub">Masuk untuk mulai bertugas</div>
+    <label>Username</label>
+    <input type="text" id="loginUser" autocomplete="username" autocapitalize="none" spellcheck="false"
+           onkeydown="if(event.key==='Enter')document.getElementById('loginPin').focus()">
+    <label>PIN</label>
+    <input type="password" id="loginPin" inputmode="numeric" autocomplete="current-password"
+           onkeydown="if(event.key==='Enter')doLogin()">
+    <div class="login-err" id="loginErr"></div>
+    <button class="btn-login" id="loginBtn" onclick="doLogin()">Masuk</button>
+    <div class="login-hint" id="loginHint"></div>
   </div>
 </div>
 
@@ -830,7 +893,7 @@ create index if not exists pos_transactions_branch_idx on pos_transactions (bran
 <script>
 // ── DATA ──────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'elva_pos_v1';
-const APP_VERSION = 'v9 · 2026-08-16';   // shown in Profile so the live build is identifiable
+const APP_VERSION = 'v10 · 2026-08-16';   // shown in Profile so the live build is identifiable
 
 const defaultProducts = [
   { id: 1,  name: 'Kopi Susu Gula Aren', emoji: '🧋', cat: 'Minuman', price: 22000, stock: 50 },
@@ -877,6 +940,10 @@ if (!state.settings.receiptNote) state.settings.receiptNote = 'Terima kasih! �
 if (state.settings.managerPin === undefined) state.settings.managerPin = '';    // '' = no lock yet
 if (!state.vouchers) state.vouchers = [];
 if (!state.shifts) state.shifts = [];
+if (state.session === undefined) state.session = null;   // { userId, username, name, role, storeId }
+if (!state.users) state.users = [];                      // cache user untuk login offline
+if (!state.activityLog) state.activityLog = [];
+if (!state.deviceId) state.deviceId = 'dev-' + Math.random().toString(36).slice(2, 10);
 if (!state.customers) state.customers = {};   // phone -> { name, visits, spent, lastVisit }
 if (!state.settings.supabaseUrl) state.settings.supabaseUrl = '';
 if (!state.settings.supabaseKey) state.settings.supabaseKey = '';
@@ -957,6 +1024,293 @@ function saveStoreName(v) {
   state.settings.storeName = (v || '').trim() || 'MUGI POS';
   saveData();
   renderBranding();
+}
+
+// ── LOGIN, USER & HAK AKSES ───────────────────────────────────────────────
+// PIN disimpan sebagai sha256(salt + pin) — rumus yang sama dipakai
+// supabase-schema.sql, jadi user bawaan hasil migrasi langsung bisa login.
+async function sha256hex(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+function makeSalt() { return Math.random().toString(36).slice(2, 10); }
+async function hashPin(salt, pin) { return sha256hex(String(salt) + String(pin)); }
+
+function currentUser() { return state.session; }
+function currentRole() { return state.session ? state.session.role : null; }
+function isOwner()   { return currentRole() === 'owner'; }
+function isManager() { return currentRole() === 'owner' || currentRole() === 'manager'; }
+
+// Toko yang sedang dilayani perangkat ini: dari user yang login, jatuh kembali
+// ke nama cabang lama supaya perangkat yang belum dimigrasi tetap jalan.
+function sessionStoreId() {
+  if (state.session && state.session.storeId) return state.session.storeId;
+  return state.settings.branchName || '';
+}
+
+// Kalau cloud belum diatur dan belum ada user sama sekali, buat owner lokal
+// supaya aplikasi tetap bisa dipakai tanpa Supabase (seperti versi sebelumnya).
+async function ensureBootstrapUser() {
+  if (state.users.length) return;
+  const salt = makeSalt();
+  state.users = [{
+    id: 'u-local-owner', username: 'owner', name: 'Owner',
+    role: 'owner', store_id: null, active: true,
+    pin_salt: salt, pin_hash: await hashPin(salt, '1234'),
+  }];
+  saveData();
+}
+
+async function refreshUsersFromCloud() {
+  if (!cloudEnabled()) return false;
+  try {
+    const res = await sbFetch('/rest/v1/users?select=*');
+    if (!res.ok) return false;
+    const rows = await res.json();
+    if (Array.isArray(rows) && rows.length) { state.users = rows; saveData(); return true; }
+  } catch (e) {}
+  return false;
+}
+
+function openLogin() {
+  document.getElementById('loginUser').value = '';
+  document.getElementById('loginPin').value = '';
+  document.getElementById('loginErr').textContent = '';
+  document.getElementById('loginLogo').innerHTML = state.settings.logo
+    ? '<img src="' + state.settings.logo + '" style="height:26px;vertical-align:middle;">' : '🏪';
+  document.getElementById('loginStoreName').textContent = state.settings.storeName || 'MUGI POS';
+  document.getElementById('loginHint').innerHTML = cloudEnabled()
+    ? 'Akun diambil dari Supabase. Saat internet mati, login memakai daftar akun yang terakhir tersimpan di perangkat ini.'
+    : '⚠️ Cloud belum diatur — memakai akun lokal perangkat ini. Login awal: <b>owner</b> / PIN <b>1234</b>.';
+  document.getElementById('loginOverlay').classList.add('show');
+  setTimeout(() => document.getElementById('loginUser').focus(), 50);
+}
+
+async function doLogin() {
+  const btn = document.getElementById('loginBtn');
+  const err = document.getElementById('loginErr');
+  const username = document.getElementById('loginUser').value.trim().toLowerCase();
+  const pin = document.getElementById('loginPin').value.trim();
+  if (!username || !pin) { err.textContent = 'Username dan PIN harus diisi.'; return; }
+
+  btn.disabled = true; err.textContent = '';
+  await refreshUsersFromCloud();          // daftar terbaru kalau ada internet
+  await ensureBootstrapUser();
+
+  const u = state.users.find(x => String(x.username).toLowerCase() === username);
+  if (!u || u.active === false) { err.textContent = 'Username tidak ditemukan atau sudah nonaktif.'; btn.disabled = false; return; }
+
+  const hash = await hashPin(u.pin_salt || '', pin);
+  if (hash !== u.pin_hash) { err.textContent = 'PIN salah.'; btn.disabled = false; return; }
+
+  state.session = {
+    userId: u.id, username: u.username, name: u.name || u.username,
+    role: u.role || 'kasir', storeId: u.store_id || null,
+  };
+  // user terikat toko -> perangkat mengikuti toko itu
+  if (u.store_id) state.settings.branchName = u.store_id;
+  state.cashier = state.session.name;
+  state.shiftStart = new Date().toISOString();
+  saveData();
+  logActivity('login', 'user', u.id, { role: u.role });
+
+  document.getElementById('loginOverlay').classList.remove('show');
+  btn.disabled = false;
+  switchPage('kasir');        // siapa pun yang masuk langsung siap melayani
+  applyRoleVisibility();
+  renderBranding(); renderCashier(); renderBranchInputs();
+  applyChannelTaxRule(); refreshPos(); renderFavourites();
+  if (cloudEnabled()) { syncNow(); syncProducts(); }
+}
+
+function doLogout(skipShiftPrompt) {
+  if (!state.session) { openLogin(); return; }
+  if (!skipShiftPrompt && state.shiftStart) {
+    if (!endShift()) return;             // batal kalau user membatalkan tutup shift
+  }
+  logActivity('logout', 'user', state.session.userId, {});
+  state.session = null;
+  state.cashier = '';
+  state.shiftStart = '';
+  saveData();
+  renderCashier();
+  openLogin();
+}
+
+// ── KELOLA AKUN (khusus Owner) ────────────────────────────────────────────
+function renderUsers() {
+  const tb = document.getElementById('userTableBody');
+  if (!tb) return;
+  tb.innerHTML = state.users.map((u, i) => `
+    <tr>
+      <td><input class="tbl-input" type="text" value="${esc(u.name || '')}" style="width:130px;" onchange="editUser(${i},'name',this.value)"></td>
+      <td><input class="tbl-input" type="text" value="${esc(u.username || '')}" style="width:130px;" onchange="editUser(${i},'username',this.value)"></td>
+      <td>
+        <select class="tbl-input" style="width:100px;" onchange="editUser(${i},'role',this.value)">
+          <option value="kasir"   ${u.role==='kasir'?'selected':''}>Kasir</option>
+          <option value="manager" ${u.role==='manager'?'selected':''}>Manager</option>
+          <option value="owner"   ${u.role==='owner'?'selected':''}>Owner</option>
+        </select>
+      </td>
+      <td><input class="tbl-input" type="text" value="${esc(u.store_id || '')}" placeholder="(semua)" style="width:110px;" onchange="editUser(${i},'store_id',this.value)"></td>
+      <td>
+        <select class="tbl-input" style="width:90px;" onchange="editUser(${i},'active',this.value==='1')">
+          <option value="1" ${u.active!==false?'selected':''}>Aktif</option>
+          <option value="0" ${u.active===false?'selected':''}>Nonaktif</option>
+        </select>
+      </td>
+      <td><button class="del-btn" onclick="removeUser(${i})" title="Hapus akun">✕</button></td>
+    </tr>`).join('');
+  document.getElementById('userCount').textContent = state.users.length + ' akun';
+}
+
+async function addUser() {
+  const username = (prompt('Username akun baru (huruf kecil, tanpa spasi):') || '').trim().toLowerCase();
+  if (!username) return;
+  if (state.users.some(u => String(u.username).toLowerCase() === username)) { alert('Username itu sudah dipakai.'); return; }
+  const name = (prompt('Nama lengkap:') || username).trim();
+  const role = (prompt('Role — ketik: kasir / manager / owner', 'kasir') || 'kasir').trim().toLowerCase();
+  if (!['kasir','manager','owner'].includes(role)) { alert('Role harus kasir, manager, atau owner.'); return; }
+  const storeId = role === 'owner' ? null : (prompt('Kode toko untuk akun ini (mis. Cabang A):', sessionStoreId()) || '').trim();
+  if (role !== 'owner' && !storeId) { alert('Kasir dan Manager wajib punya toko.'); return; }
+  const pin = (prompt('PIN awal (4-6 angka):', '1234') || '').trim();
+  if (!/^\d{4,6}$/.test(pin)) { alert('PIN harus 4-6 angka.'); return; }
+
+  const salt = makeSalt();
+  state.users.push({
+    id: 'u-' + Date.now().toString(36), username, name, role,
+    store_id: storeId || null, active: true,
+    pin_salt: salt, pin_hash: await hashPin(salt, pin),
+  });
+  saveData();
+  logActivity('user_add', 'user', username, { role });
+  renderUsers();
+  syncUsers();
+}
+
+function editUser(i, field, val) {
+  const u = state.users[i];
+  if (!u) return;
+  if (field === 'username') {
+    val = String(val).trim().toLowerCase();
+    if (!val) { renderUsers(); return; }
+    if (state.users.some((x, j) => j !== i && String(x.username).toLowerCase() === val)) {
+      alert('Username itu sudah dipakai.'); renderUsers(); return;
+    }
+  }
+  if (field === 'store_id') val = String(val).trim() || null;
+  u[field] = val;
+  saveData();
+  logActivity('user_edit', 'user', u.username, { field });
+  renderUsers();
+  syncUsers();
+}
+
+async function resetUserPin() {
+  const username = (prompt('Reset PIN untuk username mana?') || '').trim().toLowerCase();
+  if (!username) return;
+  const u = state.users.find(x => String(x.username).toLowerCase() === username);
+  if (!u) { alert('Username tidak ditemukan.'); return; }
+  const pin = (prompt('PIN baru untuk ' + u.username + ' (4-6 angka):', '1234') || '').trim();
+  if (!/^\d{4,6}$/.test(pin)) { alert('PIN harus 4-6 angka.'); return; }
+  u.pin_salt = makeSalt();
+  u.pin_hash = await hashPin(u.pin_salt, pin);
+  saveData();
+  logActivity('user_pin_reset', 'user', u.username, {});
+  syncUsers();
+  alert('PIN ' + u.username + ' sudah diganti.');
+}
+
+async function changeOwnPin() {
+  if (!state.session) return;
+  const u = state.users.find(x => x.id === state.session.userId);
+  if (!u) { alert('Akun tidak ditemukan di perangkat ini.'); return; }
+  const cur = (prompt('PIN sekarang:') || '').trim();
+  if (await hashPin(u.pin_salt || '', cur) !== u.pin_hash) { alert('PIN sekarang salah.'); return; }
+  const pin = (prompt('PIN baru (4-6 angka):') || '').trim();
+  if (!/^\d{4,6}$/.test(pin)) { alert('PIN harus 4-6 angka.'); return; }
+  u.pin_salt = makeSalt();
+  u.pin_hash = await hashPin(u.pin_salt, pin);
+  saveData();
+  logActivity('user_pin_change', 'user', u.username, {});
+  syncUsers();
+  alert('PIN berhasil diganti.');
+}
+
+function removeUser(i) {
+  const u = state.users[i];
+  if (!u) return;
+  if (state.session && u.id === state.session.userId) { alert('Tidak bisa menghapus akun yang sedang dipakai.'); return; }
+  if (state.users.filter(x => x.role === 'owner' && x.active !== false).length <= 1 && u.role === 'owner') {
+    alert('Harus ada minimal satu Owner aktif.'); return;
+  }
+  if (!confirm('Hapus akun "' + u.username + '"?')) return;
+  state.users.splice(i, 1);
+  saveData();
+  logActivity('user_delete', 'user', u.username, {});
+  renderUsers();
+  if (cloudEnabled()) sbFetch('/rest/v1/users?id=eq.' + encodeURIComponent(u.id), { method: 'DELETE' }).catch(() => {});
+}
+
+async function syncUsers() {
+  if (!cloudEnabled() || !state.users.length) return;
+  try {
+    await sbFetch('/rest/v1/users?on_conflict=id', {
+      method: 'POST',
+      headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify(state.users.map(({ _sent, ...u }) => u)),
+    });
+  } catch (e) {}
+}
+
+// ── LOG AKTIVITAS ─────────────────────────────────────────────────────────
+function logActivity(action, entity, entityId, detail) {
+  const row = {
+    id: Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
+    store_id: sessionStoreId(),
+    user_id: state.session ? state.session.userId : null,
+    user_name: state.session ? state.session.name : '',
+    action, entity: entity || '', entity_id: entityId ? String(entityId) : '',
+    detail: detail || {}, created_at: new Date().toISOString(),
+  };
+  state.activityLog.unshift(row);
+  state.activityLog = state.activityLog.slice(0, 500);
+  saveData();
+  renderActivityLog();      // segarkan kalau tab Profil sedang terbuka
+  syncActivity();
+  return row;
+}
+
+async function syncActivity() {
+  if (!cloudEnabled()) return;
+  const pending = state.activityLog.filter(r => !r._sent);
+  if (!pending.length) return;
+  try {
+    const res = await sbFetch('/rest/v1/activity_log?on_conflict=id', {
+      method: 'POST',
+      headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify(pending.map(({ _sent, ...r }) => r)),
+    });
+    if (res.ok) { pending.forEach(r => r._sent = true); saveData(); }
+  } catch (e) { /* offline — dikirim lagi nanti */ }
+}
+
+function renderActivityLog() {
+  const wrap = document.getElementById('activityLog');
+  if (!wrap) return;
+  const mine = isOwner()
+    ? state.activityLog
+    : state.activityLog.filter(r => (r.store_id || '') === sessionStoreId());
+  const rows = mine.slice(0, 50);
+  wrap.innerHTML = rows.length
+    ? '<table><thead><tr><th>Waktu</th><th>User</th><th>Aksi</th><th>Objek</th></tr></thead><tbody>' +
+      rows.map(r => `<tr>
+        <td style="color:#888;white-space:nowrap;">${new Date(r.created_at).toLocaleString('id-ID', {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</td>
+        <td style="font-weight:500;">${esc(r.user_name || '-')}</td>
+        <td>${esc(r.action)}</td>
+        <td style="color:#888;">${esc(r.entity || '')}${r.entity_id ? ' #' + esc(r.entity_id) : ''}</td>
+      </tr>`).join('') + '</tbody></table>'
+    : '<div style="font-size:13px;color:#bbb;">Belum ada aktivitas tercatat.</div>';
 }
 
 // ── BRANCH / RECEIPT SETTINGS ─────────────────────────────────────────────
@@ -1071,61 +1425,28 @@ function renderCustomers() {
     : '<div style="font-size:13px;color:#bbb;">Belum ada pelanggan tersimpan.</div>';
 }
 
-// ── ROLES: KASIR vs MANAJEMEN ─────────────────────────────────────────────
-let managerUnlocked = false;
-
-function managerMode() {
-  return !state.settings.managerPin || managerUnlocked;   // no PIN set = everything open
-}
-
+// ── HAK AKSES BERDASARKAN ROLE AKUN ───────────────────────────────────────
+// Menggantikan PIN perangkat: hak akses sekarang melekat pada akun yang login.
 function applyRoleVisibility() {
-  const open = managerMode();
-  document.querySelectorAll('.mgr-only').forEach(el => { el.style.display = open ? '' : 'none'; });
+  const owner = isOwner(), manager = isManager();
+
+  document.querySelectorAll('.mgr-only').forEach(el => { el.style.display = manager ? '' : 'none'; });
+  document.querySelectorAll('.owner-only').forEach(el => { el.style.display = owner ? '' : 'none'; });
+
   const produkTab = document.querySelector('.tab-btn[data-page="produk"]');
-  if (produkTab) produkTab.style.display = open ? '' : 'none';
-  if (!open && document.getElementById('page-produk').classList.contains('active')) switchPage('kasir');
+  if (produkTab) produkTab.style.display = manager ? '' : 'none';
+  if (!manager && document.getElementById('page-produk').classList.contains('active')) switchPage('kasir');
 
   const badge = document.getElementById('roleBadge');
-  if (badge) badge.textContent = open ? 'Manajemen' : 'Kasir';
+  if (badge) {
+    const r = currentRole();
+    badge.textContent = r ? ({ owner: 'Owner', manager: 'Manager', kasir: 'Kasir' })[r] || r : '—';
+    badge.className = 'badge role-pill ' + (r ? 'role-' + r : '');
+  }
+  const who = document.getElementById('sessionWho');
+  if (who) who.textContent = state.session ? state.session.name + ' · @' + state.session.username : 'belum masuk';
   const vb = document.getElementById('versionBadge');
   if (vb) vb.textContent = APP_VERSION;
-  const ub = document.getElementById('mgrUnlockBtn'), lb = document.getElementById('mgrLockBtn');
-  if (ub) ub.style.display = open ? 'none' : '';
-  if (lb) lb.style.display = open && state.settings.managerPin ? '' : 'none';
-  const warn = document.getElementById('pinWarn');
-  if (warn) warn.textContent = state.settings.managerPin
-    ? '' : '⚠️ PIN belum diatur — semua orang masih bisa mengubah harga & menu. Tekan "Atur / Ganti PIN".';
-}
-
-function unlockManager() {
-  if (!state.settings.managerPin) { alert('PIN belum diatur, semua menu masih terbuka. Tekan "Atur / Ganti PIN" untuk mengunci.'); return; }
-  const pin = prompt('Masukkan PIN manajemen:');
-  if (pin === null) return;
-  if (pin !== state.settings.managerPin) { alert('PIN salah.'); return; }
-  managerUnlocked = true;
-  applyRoleVisibility();
-  renderBranchInputs(); renderVouchers(); renderCustomers();
-}
-
-function lockManager() {
-  managerUnlocked = false;
-  applyRoleVisibility();
-}
-
-function setManagerPin() {
-  if (state.settings.managerPin && !managerUnlocked) {
-    const cur = prompt('Masukkan PIN lama:');
-    if (cur !== state.settings.managerPin) { alert('PIN salah.'); return; }
-  }
-  const pin = prompt('PIN manajemen baru (4-6 angka). Kosongkan untuk membuka kunci semua menu:');
-  if (pin === null) return;
-  const clean = pin.trim();
-  if (clean && !/^\d{4,6}$/.test(clean)) { alert('PIN harus 4-6 angka.'); return; }
-  state.settings.managerPin = clean;
-  managerUnlocked = true;
-  saveData();
-  applyRoleVisibility();
-  alert(clean ? 'PIN tersimpan. Kasir sekarang tidak bisa mengubah harga/menu tanpa PIN.' : 'Kunci dilepas — semua menu terbuka.');
 }
 
 // ── CASHIER / SHIFT ───────────────────────────────────────────────────────
@@ -1155,17 +1476,8 @@ function renderCashier() {
   }
 }
 
-function openShift(cancellable) {
-  document.getElementById('shiftNameInput').value = '';
-  document.getElementById('shiftError').textContent = '';
-  document.getElementById('shiftCancelBtn').style.display = cancellable ? '' : 'none';
-  const quick = document.getElementById('shiftQuickPick');
-  quick.innerHTML = state.settings.cashiers.map(c =>
-    `<button class="add-btn" style="font-size:12px;padding:5px 12px;" onclick="document.getElementById('shiftNameInput').value='${esc(c).replace(/'/g, "\\'")}';startShift();">${esc(c)}</button>`
-  ).join('');
-  document.getElementById('shiftModal').classList.add('show');
-  setTimeout(() => document.getElementById('shiftNameInput').focus(), 50);
-}
+// Ganti kasir = logout lalu login akun lain, jadi shift selalu terikat akun.
+function openShift() { doLogout(); }
 
 function closeShift() { document.getElementById('shiftModal').classList.remove('show'); }
 
@@ -1200,7 +1512,7 @@ function shiftSummary() {
 }
 
 function endShift() {
-  if (!state.cashier) { alert('Belum ada kasir yang bertugas.'); return; }
+  if (!state.cashier) { alert('Belum ada kasir yang bertugas.'); return false; }
   const s = shiftSummary();
   const dur = s ? Math.round((Date.now() - s.from) / 60000) : 0;
   const hh = Math.floor(dur / 60), mm = dur % 60;
@@ -1219,10 +1531,14 @@ function endShift() {
     '',
     'Akhiri shift sekarang?',
   ];
-  if (!confirm(lines.join('\n'))) return;
+  if (!confirm(lines.join('\n'))) return false;
 
   if (s) {
     if (!state.shifts) state.shifts = [];
+if (state.session === undefined) state.session = null;   // { userId, username, name, role, storeId }
+if (!state.users) state.users = [];                      // cache user untuk login offline
+if (!state.activityLog) state.activityLog = [];
+if (!state.deviceId) state.deviceId = 'dev-' + Math.random().toString(36).slice(2, 10);
     state.shifts.unshift({
       cashier: state.cashier, branch: branchKey(),
       start: state.shiftStart, end: new Date().toISOString(),
@@ -1231,11 +1547,15 @@ function endShift() {
     });
     state.shifts = state.shifts.slice(0, 200);
   }
+  logActivity('shift_close', 'shift', state.session ? state.session.userId : '', {
+    total: s ? s.total : 0, cash: s ? s.cash : 0, count: s ? s.count : 0,
+  });
   state.cashier = '';
   state.shiftStart = '';
   saveData();
   renderCashier();
   renderShiftLog();
+  return true;
 }
 
 function renderShiftLog() {
@@ -1270,7 +1590,7 @@ function switchPage(name) {
   document.getElementById('page-' + name).classList.add('active');
   const btn = document.querySelector('.tab-btn[data-page="' + name + '"]');
   if (btn) btn.classList.add('active');          // 'profil' opens from the avatar, not a tab
-  if (name === 'profil') { renderBranding(); renderCashier(); renderBranchInputs(); renderVouchers(); renderCustomers(); renderShiftLog(); applyRoleVisibility(); }
+  if (name === 'profil') { renderBranding(); renderCashier(); renderBranchInputs(); renderVouchers(); renderCustomers(); renderShiftLog(); renderUsers(); renderActivityLog(); applyRoleVisibility(); }
   if (name === 'produk') renderProductTable();
   if (name === 'riwayat') renderHistory();
   if (name === 'laporan') renderReport();
@@ -1682,6 +2002,7 @@ function reprintTransaction(i) {
   if (!trx) return;
   trx.reprintCount = (trx.reprintCount || 0) + 1;
   saveData();
+  logActivity('reprint', 'transaction', trx.id, { count: trx.reprintCount });
   showReceipt(trx, true);
   renderHistory();
 }
@@ -1965,6 +2286,7 @@ async function voidTransaction(i) {
   state.transactions.splice(i, 1);
   state.unsynced = state.unsynced.filter(u => u !== trx.uid);
   saveData();
+  logActivity('void', 'transaction', trx.id, { total: trx.total });
 
   let cloudMsg = '';
   if (cloudEnabled() && trx.uid) {
@@ -2291,6 +2613,7 @@ async function saveCloudSettings() {
       if (cloudCount === 0) {
         queueAllProductsForSync();
         syncProducts();
+        syncUsers();
         status.innerHTML = '<span style="color:#27ae60;">✓ Terhubung! Cloud masih kosong, jadi produk &amp; transaksi di perangkat ini diunggah ke cloud.</span>';
       } else {
         // drop any product edits queued before connecting, so nothing silently
@@ -2390,7 +2713,25 @@ renderProducts();
 renderCart();
 updateCloudBadge();
 if (cloudEnabled()) { syncNow(); syncProducts(); }
-if (!state.cashier) openShift(false);   // ask who is on shift before the first sale
+// Wajib login sebelum aplikasi bisa dipakai.
+(async () => {
+  await ensureBootstrapUser();
+  if (cloudEnabled()) refreshUsersFromCloud();
+  if (state.session) {
+    applyRoleVisibility();
+    if (!state.shiftStart) { state.shiftStart = new Date().toISOString(); saveData(); }
+    renderCashier();
+  } else {
+    openLogin();
+  }
+})();
+
+// Begitu internet kembali, kirim semua yang mengantre tanpa menunggu
+// transaksi berikutnya.
+window.addEventListener('online', () => {
+  if (!cloudEnabled()) return;
+  syncNow(); syncProducts(); syncUsers(); syncActivity();
+});
 
 // ── INSTALLABLE APP (PWA) ─────────────────────────────────────────────────
 // Registers the offline cache. Only works over http(s), not when the file is

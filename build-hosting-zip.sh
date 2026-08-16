@@ -11,7 +11,7 @@ sed 's|href="pos.webmanifest"|href="manifest.json"|' pos.html > "$OUT/index.html
 # same manifest, but rooted at the domain instead of /pos.html
 sed 's|"start_url": "pos.html"|"start_url": "./"|' pos.webmanifest > "$OUT/manifest.json"
 
-cp sw.js icon-192.png icon-512.png icon-maskable.png "$OUT/"
+cp sw.js icon-192.png icon-512.png icon-maskable.png supabase-schema.sql "$OUT/"
 
 cd "$OUT"
 rm -f ../mugi-pos.zip

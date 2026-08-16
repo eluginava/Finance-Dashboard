@@ -374,20 +374,22 @@
           <thead>
             <tr>
               <th>⭐</th>
-              <th>Foto</th>
+              <th>Jual</th>
               <th>Produk</th>
               <th>Kategori</th>
-              <th>Harga (Rp)</th>
+              <th>Harga toko ini</th>
               <th>Stok</th>
-              <th></th>
+              <th>Satuan</th>
             </tr>
           </thead>
           <tbody id="productTableBody"></tbody>
         </table>
       </div>
-      <div style="margin-top:16px; text-align:right;">
-        <button class="add-btn" onclick="addProduct()">+ Tambah Produk</button>
-      </div>
+      <p style="font-size:12px;color:#888;line-height:1.6;margin-top:12px;">
+        Nama, kategori, foto, dan satuan diatur di tab <b>Master</b> oleh Owner untuk semua toko.
+        Di sini toko ini menentukan <b>menjual atau tidak</b>, <b>harga</b>, dan <b>stok</b> —
+        jadi cabang di lokasi strategis boleh memasang harga berbeda.
+      </p>
     </div>
   </div>
 
@@ -432,6 +434,18 @@
         Nama, kategori, foto, dan satuan diatur di sini untuk semua toko.
         <b>Harga jual dan stok diatur per toko</b> di tab Produk masing-masing cabang.
       </p>
+    </div>
+
+    <div class="section">
+      <div class="section-title">
+        Ketersediaan per Toko
+        <span class="badge" id="availStores">0 toko</span>
+      </div>
+      <p style="font-size:12px;color:#888;line-height:1.6;margin-bottom:12px;">
+        Centang berarti toko itu menjual produknya. Toko yang belum pernah dipakai perangkat ini
+        baru muncul setelah datanya tertarik dari cloud.
+      </p>
+      <div id="availabilityMatrix" style="overflow-x:auto;"></div>
     </div>
   </div>
 
@@ -995,7 +1009,7 @@ create index if not exists pos_transactions_branch_idx on pos_transactions (bran
 <script>
 // ── DATA ──────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'elva_pos_v1';
-const APP_VERSION = 'v12 · 2026-08-16';   // shown in Profile so the live build is identifiable
+const APP_VERSION = 'v13 · 2026-08-16';   // shown in Profile so the live build is identifiable
 
 const defaultProducts = [
   { id: 1,  name: 'Kopi Susu Gula Aren', emoji: '🧋', cat: 'Minuman', price: 22000, stock: 50 },
@@ -1048,6 +1062,7 @@ if (!state.activityLog) state.activityLog = [];
 if (!state.categories) state.categories = [];   // 2 level: parentId null = Grup
 if (!state.master) state.master = [];           // master produk lintas toko
 if (!state.variants) state.variants = [];       // varian per produk
+if (!state.storeProducts) state.storeProducts = [];  // jual/harga/stok per toko per varian
 if (!state.deviceId) state.deviceId = 'dev-' + Math.random().toString(36).slice(2, 10);
 if (!state.customers) state.customers = {};   // phone -> { name, visits, spent, lastVisit }
 if (!state.settings.supabaseUrl) state.settings.supabaseUrl = '';
@@ -1214,6 +1229,10 @@ async function doLogin() {
   };
   // user terikat toko -> perangkat mengikuti toko itu
   if (u.store_id) state.settings.branchName = u.store_id;
+  // Toko yang baru pertama kali dipakai di perangkat ini langsung mendapat
+  // seluruh katalog master (harga saran, stok 0) supaya layar kasir tidak
+  // kosong; tinggal disesuaikan di tab Produk.
+  ensureStoreRows();
   state.cashier = state.session.name;
   state.shiftStart = new Date().toISOString();
   saveData();
@@ -1512,6 +1531,96 @@ function removeVoucher(i) {
   saveData(); renderVouchers();
 }
 
+// ── PRODUK PER TOKO (store_products) ──────────────────────────────────────
+// Inilah unit jual sebenarnya: satu baris per toko × produk × varian, memegang
+// "dijual atau tidak", harga toko itu, stok, dan status favorit.
+function spKey(storeId, productId, variantId) { return storeId + ':' + productId + ':' + variantId; }
+
+function bootstrapStoreProducts() {
+  if (state.storeProducts.length) return;
+  const store = branchKey();
+  state.products.forEach(p => {
+    const vs = variantsOf(p.id);
+    (vs.length ? vs : [{ id: p.id }]).forEach((v, idx) => {
+      state.storeProducts.push({
+        pkey: spKey(store, p.id, v.id), storeId: store, productId: p.id, variantId: v.id,
+        sold: true, price: p.price || 0, stock: idx === 0 ? (p.stock || 0) : 0, fav: !!p.fav,
+      });
+    });
+  });
+  saveData();
+}
+
+// Varian atau produk yang baru dibuat di master butuh barisnya sendiri di toko ini.
+function ensureStoreRows(storeId) {
+  storeId = storeId || branchKey();
+  let added = 0;
+  state.master.forEach(m => variantsOf(m.id).forEach(v => {
+    const k = spKey(storeId, m.id, v.id);
+    if (state.storeProducts.some(sp => sp.pkey === k)) return;
+    const base = state.storeProducts.find(sp => sp.storeId === storeId && sp.productId === m.id);
+    state.storeProducts.push({
+      pkey: k, storeId, productId: m.id, variantId: v.id,
+      sold: base ? base.sold !== false : true,
+      price: base ? base.price : (m.defaultPrice || 0),
+      stock: 0, fav: false,
+    });
+    added++;
+  }));
+  if (added) saveData();
+  return added;
+}
+
+function storeRows(storeId) {
+  storeId = storeId || branchKey();
+  return state.storeProducts.filter(sp => sp.storeId === storeId);
+}
+
+// Daftar yang benar-benar bisa dijual di layar kasir toko ini.
+function sellableItems() {
+  const store = branchKey();
+  return state.storeProducts
+    .filter(sp => sp.storeId === store && sp.sold !== false)
+    .map(sp => {
+      const m = state.master.find(x => x.id === sp.productId);
+      if (!m || m.active === false) return null;
+      const v = state.variants.find(x => x.id === sp.variantId);
+      const vname = v && v.active !== false ? (v.name || '') : null;
+      if (vname === null) return null;                      // varian nonaktif
+      const cat = state.categories.find(c => c.id === m.categoryId);
+      return {
+        key: sp.pkey, productId: sp.productId, variantId: sp.variantId,
+        name: m.name, variantName: vname,
+        label: m.name + (vname ? ' — ' + vname : ''),
+        emoji: m.emoji || '📦', img: m.img || '', unit: m.unit || '',
+        cat: cat ? cat.name : 'Lainnya',
+        group: cat && cat.parentId ? (state.categories.find(g => g.id === cat.parentId) || {}).name : null,
+        price: sp.price || 0, stock: sp.stock || 0, fav: !!sp.fav,
+      };
+    })
+    .filter(Boolean);
+}
+
+function itemByKey(key) { return sellableItems().find(x => x.key === key); }
+function spByKey(key)   { return state.storeProducts.find(sp => sp.pkey === key); }
+
+async function syncStoreProducts() {
+  if (!cloudEnabled()) return;
+  const rows = storeRows().map(sp => ({
+    pkey: sp.pkey, store_id: sp.storeId, product_id: sp.productId, variant_id: sp.variantId,
+    sold: sp.sold !== false, price: sp.price || 0, stock: sp.stock || 0, fav: !!sp.fav,
+    updated_at: new Date().toISOString(),
+  }));
+  if (!rows.length) return;
+  try {
+    await sbFetch('/rest/v1/store_products?on_conflict=pkey', {
+      method: 'POST',
+      headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify(rows),
+    });
+  } catch (e) {}
+}
+
 // ── MASTER: KATEGORI, PRODUK, VARIAN ──────────────────────────────────────
 // Data master dibentuk dari produk yang sudah ada supaya tidak ada yang hilang
 // saat aplikasi diperbarui. Kasir masih memakai state.products sampai Tahap 5,
@@ -1694,9 +1803,8 @@ function addMasterProduct() {
   const id = Math.max(0, ...state.master.map(m => m.id), ...state.products.map(p => p.id)) + 1;
   state.master.push({ id, sku: '', name, categoryId: null, emoji: '📦', img: '', unit: '', defaultPrice: 0, active: true });
   state.variants.push({ id, productId: id, name: '', sku: '', sortOrder: 0, active: true });
-  // langsung tersedia di toko ini supaya bisa dijual hari itu juga
-  state.products.push({ id, name, emoji: '📦', cat: 'Lainnya', price: 0, stock: 0 });
   saveData();
+  ensureStoreRows();          // langsung tersedia di toko ini supaya bisa dijual hari itu juga
   logActivity('product_add', 'product', name, {});
   markProductDirty(id); scheduleProductSync();
   renderMaster(); refreshPos(); syncMaster();
@@ -1743,6 +1851,47 @@ function uploadMasterImage(i, input) {
   reader.readAsDataURL(file);
 }
 
+// ── Ketersediaan produk per toko ──
+function knownStores() {
+  const set = new Set(state.storeProducts.map(sp => sp.storeId));
+  set.add(branchKey());
+  state.transactions.forEach(t => { if (t.branch) set.add(t.branch); });
+  return [...set].filter(Boolean).sort();
+}
+
+function renderAvailability() {
+  const wrap = document.getElementById('availabilityMatrix');
+  if (!wrap) return;
+  const stores = knownStores();
+  document.getElementById('availStores').textContent = stores.length + ' toko';
+  if (!state.master.length) { wrap.innerHTML = '<div style="font-size:13px;color:#bbb;">Belum ada produk.</div>'; return; }
+  wrap.innerHTML = '<table><thead><tr><th>Produk</th>' +
+    stores.map(st => `<th style="text-align:center;">${esc(st)}</th>`).join('') + '</tr></thead><tbody>' +
+    state.master.map(m => '<tr><td style="font-weight:500;white-space:nowrap;">' + esc(m.name) + '</td>' +
+      stores.map(st => {
+        const rows = variantsOf(m.id).map(v => state.storeProducts.find(sp => sp.pkey === spKey(st, m.id, v.id))).filter(Boolean);
+        const on = rows.length && rows.every(r => r.sold !== false);
+        const some = rows.some(r => r.sold !== false);
+        return `<td style="text-align:center;">
+          <input type="checkbox" ${on ? 'checked' : ''} style="accent-color:#27ae60;width:16px;height:16px;${some && !on ? 'opacity:.5;' : ''}"
+                 onchange="setAvailability('${esc(st)}',${m.id},this.checked)">
+        </td>`;
+      }).join('') + '</tr>').join('') + '</tbody></table>';
+}
+
+function setAvailability(storeId, productId, sold) {
+  ensureStoreRows(storeId);
+  variantsOf(productId).forEach(v => {
+    const sp = state.storeProducts.find(x => x.pkey === spKey(storeId, productId, v.id));
+    if (sp) sp.sold = sold;
+  });
+  saveData();
+  logActivity('product_edit', 'availability', productId, { store: storeId, sold });
+  renderAvailability();
+  if (storeId === branchKey()) { renderProductTable(); refreshPos(); }
+  syncStoreProducts();
+}
+
 // ── Varian ──
 let variantProductIdx = null;
 function openVariants(i) {
@@ -1777,8 +1926,9 @@ function addVariant() {
   const id = Math.max(0, ...state.variants.map(v => v.id)) + 1;
   state.variants.push({ id, productId: m.id, name, sku: '', sortOrder: variantsOf(m.id).length, active: true });
   saveData();
+  ensureStoreRows();          // varian baru butuh harga & stoknya sendiri di toko ini
   logActivity('variant_change', 'product', m.name, { add: name });
-  renderVariants(); renderMaster(); syncMaster();
+  renderVariants(); renderMaster(); refreshPos(); syncMaster();
 }
 
 function editVariant(idx, field, val) {
@@ -1787,7 +1937,7 @@ function editVariant(idx, field, val) {
   v[field] = typeof val === 'string' ? val.trim() : val;
   saveData();
   logActivity('variant_change', 'product', v.productId, { field });
-  renderVariants(); renderMaster(); syncMaster();
+  renderVariants(); renderMaster(); refreshPos(); syncMaster();
 }
 
 function removeVariant(idx) {
@@ -1798,7 +1948,7 @@ function removeVariant(idx) {
   state.variants.splice(idx, 1);
   saveData();
   logActivity('variant_change', 'product', v.productId, { remove: v.name });
-  renderVariants(); renderMaster(); syncMaster();
+  renderVariants(); renderMaster(); refreshPos(); syncMaster();
 }
 
 // Master, kategori, dan varian global lintas toko — tidak di-scope per toko.
@@ -2175,6 +2325,7 @@ if (!state.activityLog) state.activityLog = [];
 if (!state.categories) state.categories = [];   // 2 level: parentId null = Grup
 if (!state.master) state.master = [];           // master produk lintas toko
 if (!state.variants) state.variants = [];       // varian per produk
+if (!state.storeProducts) state.storeProducts = [];  // jual/harga/stok per toko per varian
 if (!state.deviceId) state.deviceId = 'dev-' + Math.random().toString(36).slice(2, 10);
     state.shifts.unshift({
       cashier: state.cashier, branch: branchKey(),
@@ -2228,7 +2379,8 @@ function switchPage(name) {
   const btn = document.querySelector('.tab-btn[data-page="' + name + '"]');
   if (btn) btn.classList.add('active');          // 'profil' opens from the avatar, not a tab
   if (name === 'profil') { renderBranding(); renderCashier(); renderBranchInputs(); renderVouchers(); renderCustomers(); renderShiftLog(); renderUsers(); renderActivityLog(); applyRoleVisibility(); }
-  if (name === 'master') { renderCategories(); renderMaster(); }
+  if (name === 'kasir') refreshPos();
+  if (name === 'master') { renderCategories(); renderMaster(); renderAvailability(); }
   if (name === 'pelanggan') renderCustomerPage();
   if (name === 'produk') renderProductTable();
   if (name === 'riwayat') renderHistory();
@@ -2236,8 +2388,10 @@ function switchPage(name) {
 }
 
 // ── KASIR: PRODUCT GRID ───────────────────────────────────────────────────
+// Chip kategori diturunkan dari produk yang DIJUAL toko ini, jadi toko kopi
+// tidak akan pernah melihat kategori bridal tanpa perlu diatur manual.
 function getCategories() {
-  return ['Semua', ...new Set(state.products.map(p => p.cat))];
+  return ['Semua', ...new Set(sellableItems().map(p => p.cat))];
 }
 
 function renderCatChips() {
@@ -2255,18 +2409,20 @@ function renderCatChips() {
 // Top 9 shortcuts: products starred in Produk, topped up with the best
 // sellers of the last 30 days so the grid is useful before anything is pinned.
 function favouriteProducts() {
-  const pinned = state.products.filter(p => p.fav);
+  const items = sellableItems();
+  const pinned = items.filter(p => p.fav);
   if (pinned.length >= 9) return pinned.slice(0, 9);
-
   const since = new Date(); since.setDate(since.getDate() - 30);
   const sold = {};
   state.transactions.forEach(t => {
     if (new Date(t.time) < since) return;
-    t.items.forEach(it => { sold[it.name] = (sold[it.name] || 0) + it.qty; });
+    (t.items || []).forEach(it => {
+      const k = (it.productId != null ? it.productId : it.name) + '|' + (it.variantId != null ? it.variantId : '');
+      sold[k] = (sold[k] || 0) + it.qty;
+    });
   });
-  const rest = state.products
-    .filter(p => !p.fav)
-    .sort((a, b) => (sold[b.name] || 0) - (sold[a.name] || 0));
+  const score = p => sold[p.productId + '|' + p.variantId] || sold[p.name + '|'] || 0;
+  const rest = items.filter(p => !p.fav).sort((a, b) => score(b) - score(a));
   return pinned.concat(rest).slice(0, 9);
 }
 
@@ -2276,63 +2432,50 @@ function renderFavourites() {
   document.getElementById('favSection').style.display = favs.length ? '' : 'none';
   grid.innerHTML = '';
   favs.forEach(p => {
-    const inCart = cart.find(c => c.productId === p.id);
+    const inCart = cart.find(c => c.key === p.key);
     const left = p.stock - (inCart ? inCart.qty : 0);
     const card = document.createElement('button');
     card.className = 'fav-card';
     card.innerHTML = `
-      ${p.img ? `<img class="fav-thumb" src="${p.img}" alt="">` : `<div class="fav-thumb">${p.emoji || '📦'}</div>`}
+      ${p.img ? `<img class="fav-thumb" src="${p.img}" alt="">` : `<div class="fav-thumb">${p.emoji}</div>`}
       <div style="min-width:0;">
-        <div class="fav-name">${esc(p.name)}</div>
+        <div class="fav-name">${esc(p.label)}</div>
         <div class="fav-price">${fmt(p.price)}${left < 0 ? ' · stok ' + left + ' ⚠' : ''}</div>
       </div>`;
-    card.onclick = () => addToCart(p.id);
+    card.onclick = () => addToCart(p.key);
     grid.appendChild(card);
   });
-}
-
-function toggleFav(i) {
-  const p = state.products[i];
-  const pinnedCount = state.products.filter(x => x.fav).length;
-  if (!p.fav && pinnedCount >= 9) { alert('Maksimal 9 menu favorit. Lepas salah satu bintang dulu.'); return; }
-  p.fav = !p.fav;
-  saveData();
-  markProductDirty(p.id);
-  scheduleProductSync();
-  renderProductTable();
-  renderFavourites();
 }
 
 function renderProducts() {
   const grid = document.getElementById('productGrid');
   const q = document.getElementById('searchInput').value.toLowerCase();
   grid.innerHTML = '';
-  state.products
-    .filter(p => (activeCat === 'Semua' || p.cat === activeCat) && p.name.toLowerCase().includes(q))
+  sellableItems()
+    .filter(p => (activeCat === 'Semua' || p.cat === activeCat) && p.label.toLowerCase().includes(q))
     .forEach(p => {
-      const inCart = cart.find(c => c.productId === p.id);
+      const inCart = cart.find(c => c.key === p.key);
       const left = p.stock - (inCart ? inCart.qty : 0);
-      let stockClass = '', stockText = 'Stok: ' + left;
-      if (left < 0)       { stockClass = 'empty'; stockText = 'Stok: ' + left + ' ⚠'; }
-      else if (left === 0){ stockClass = 'empty'; stockText = 'Stok: 0'; }
-      else if (left <= 5) { stockClass = 'low';   stockText = 'Sisa ' + left + '!'; }
+      let stockClass = '', stockText = 'Stok: ' + left + (p.unit ? ' ' + p.unit : '');
+      if (left < 0)        { stockClass = 'empty'; stockText = 'Stok: ' + left + ' ⚠'; }
+      else if (left === 0) { stockClass = 'empty'; stockText = 'Stok: 0'; }
+      else if (left <= 5)  { stockClass = 'low';   stockText = 'Sisa ' + left + '!'; }
       const card = document.createElement('div');
-      card.className = 'product-card';   // stok hanya penanda — kartu selalu bisa diklik
+      card.className = 'product-card';   // stok hanya penanda — selalu bisa diklik
       const thumb = p.img
         ? `<img class="product-thumb" src="${p.img}" alt="${esc(p.name)}">`
         : `<div class="product-thumb">${p.emoji}</div>`;
       card.innerHTML = `
         ${thumb}
-        <div class="product-name">${esc(p.name)}</div>
+        <div class="product-name">${esc(p.name)}${p.variantName ? `<span style="display:block;font-weight:500;color:#888;font-size:11px;">${esc(p.variantName)}</span>` : ''}</div>
         <div class="product-price">${fmt(p.price)}</div>
         <div class="product-stock ${stockClass}">${stockText}</div>
       `;
-      card.onclick = () => addToCart(p.id);
+      card.onclick = () => addToCart(p.key);
       grid.appendChild(card);
     });
 }
 
-// ── KASIR: CHANNEL ────────────────────────────────────────────────────────
 function renderChannelChips() {
   document.getElementById('channelChips').innerHTML = CHANNELS.map(c =>
     `<button class="channel-chip ${c.cls} ${channel === c.id ? 'active' : ''}" onclick="selectChannel('${c.id}')"><span class="dot" style="background:${c.dot}"></span>${c.label}</button>`
@@ -2347,20 +2490,20 @@ function selectChannel(c) {
 }
 
 // ── KASIR: CART ───────────────────────────────────────────────────────────
-function addToCart(id) {
-  const item = cart.find(c => c.productId === id);
+function addToCart(key) {
+  const item = cart.find(c => c.key === key);
   // Stok sengaja tidak membatasi penjualan: kalau stok telat di-update, kasir
   // tetap bisa melayani pembeli. Stok hanya penanda, boleh minus.
   if (item) item.qty++;
-  else cart.push({ productId: id, qty: 1 });
+  else cart.push({ key, qty: 1 });
   renderCart(); renderProducts(); renderFavourites();
 }
 
-function changeQty(id, delta) {
-  const item = cart.find(c => c.productId === id);
+function changeQty(key, delta) {
+  const item = cart.find(c => c.key === key);
   if (!item) return;
   item.qty += delta;
-  if (item.qty <= 0) cart = cart.filter(c => c.productId !== id);
+  if (item.qty <= 0) cart = cart.filter(c => c.key !== key);
   renderCart(); renderProducts(); renderFavourites();
 }
 
@@ -2390,7 +2533,7 @@ let activeVoucher = null;   // { code, type: 'percent'|'amount', value }
 
 function cartTotals() {
   const subtotal = cart.reduce((s, c) => {
-    const p = state.products.find(p => p.id === c.productId);
+    const p = itemByKey(c.key);
     return s + (p ? p.price * c.qty : 0);
   }, 0);
   let discount = parseFloat(document.getElementById('discountInput').value) || 0;
@@ -2426,14 +2569,14 @@ function renderCart() {
     wrap.innerHTML = '<div class="cart-empty">Keranjang kosong.<br>Klik produk untuk menambah.</div>';
   } else {
     wrap.innerHTML = '<div class="cart-items">' + cart.map(c => {
-      const p = state.products.find(p => p.id === c.productId);
+      const p = itemByKey(c.key);
       if (!p) return '';
       return `
         <div class="cart-item">
-          <div class="ci-name">${esc(p.name)}<span class="ci-price">${fmt(p.price)}</span></div>
-          <button class="qty-btn" onclick="changeQty(${p.id}, -1)">−</button>
+          <div class="ci-name">${esc(p.label)}<span class="ci-price">${fmt(p.price)}${p.unit ? ' / ' + esc(p.unit) : ''}</span></div>
+          <button class="qty-btn" onclick="changeQty('${p.key}', -1)">−</button>
           <span class="ci-qty">${c.qty}</span>
-          <button class="qty-btn" onclick="changeQty(${p.id}, 1)">+</button>
+          <button class="qty-btn" onclick="changeQty('${p.key}', 1)">+</button>
           <div class="ci-total">${fmt(p.price * c.qty)}</div>
         </div>`;
     }).join('') + '</div>';
@@ -2546,8 +2689,12 @@ function confirmPayment() {
     id: trxPrefix() + '-' + String(state.nextTrxNum).padStart(4, '0'),
     time: new Date().toISOString(),
     items: cart.map(c => {
-      const p = state.products.find(p => p.id === c.productId);
-      return { name: p.name, price: p.price, qty: c.qty };
+      const p = itemByKey(c.key);
+      return {
+        productId: p.productId, variantId: p.variantId,
+        name: p.name, variantName: p.variantName || '', unit: p.unit || '',
+        price: p.price, qty: c.qty,
+      };
     }),
     subtotal: t.subtotal, discount: t.discount, tax: t.tax, total: t.total,
     method: online ? channel : payMethod, cash: cash, change: cash - t.total,
@@ -2576,10 +2723,10 @@ function confirmPayment() {
 
   // decrement stock
   cart.forEach(c => {
-    const p = state.products.find(p => p.id === c.productId);
-    if (p) { p.stock = p.stock - c.qty; markProductDirty(p.id); }   // boleh minus
+    const sp = spByKey(c.key);
+    if (sp) sp.stock = sp.stock - c.qty;          // boleh minus
   });
-  scheduleProductSync();
+  syncStoreProducts();
 
   state.unsynced.push(trx.uid);
   saveData();
@@ -2614,8 +2761,9 @@ function showReceipt(trx, isReprint) {
   }
   html += `<div class="r-line"></div>`;
   trx.items.forEach(it => {
-    const u = (state.master.find(m => m.name === it.name) || {}).unit;
-    html += `<div class="r-row"><span>${esc(it.name)} x${it.qty}${u ? ' ' + esc(u) : ''}</span><span>${fmt(it.price * it.qty)}</span></div>`;
+    const u = it.unit || (state.master.find(m => m.name === it.name) || {}).unit || '';
+    const label = esc(it.name) + (it.variantName ? ' ' + esc(it.variantName) : '');
+    html += `<div class="r-row"><span>${label} x${it.qty}${u ? ' ' + esc(u) : ''}</span><span>${fmt(it.price * it.qty)}</span></div>`;
   });
   html += `<div class="r-line"></div>
     <div class="r-row"><span>Subtotal</span><span>${fmt(trx.subtotal)}</span></div>`;
@@ -2674,55 +2822,67 @@ function printReceipt() {
 
 // ── PRODUK PAGE ───────────────────────────────────────────────────────────
 function renderProductTable() {
+  ensureStoreRows();
   const tbody = document.getElementById('productTableBody');
   tbody.innerHTML = '';
-  state.products.forEach((p, i) => {
+  const rows = storeRows()
+    .map(sp => {
+      const m = state.master.find(x => x.id === sp.productId);
+      const v = state.variants.find(x => x.id === sp.variantId);
+      return m ? { sp, m, v } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.m.name.localeCompare(b.m.name) || String(a.v && a.v.name).localeCompare(String(b.v && b.v.name)));
+
+  rows.forEach(({ sp, m, v }) => {
+    const cat = state.categories.find(c => c.id === m.categoryId);
     const tr = document.createElement('tr');
-    const thumb = p.img
-      ? `<img src="${p.img}" style="width:64px;height:36px;object-fit:cover;border-radius:6px;vertical-align:middle;">`
-      : `<span style="font-size:20px;vertical-align:middle;">${esc(p.emoji)}</span>`;
     tr.innerHTML = `
-      <td><button class="fav-star" title="Jadikan menu favorit (maks 9)" onclick="toggleFav(${i})">${p.fav ? '⭐' : '☆'}</button></td>
+      <td><button class="fav-star" title="Jadikan menu favorit" onclick="toggleFav('${sp.pkey}')">${sp.fav ? '⭐' : '☆'}</button></td>
+      <td><input type="checkbox" ${sp.sold !== false ? 'checked' : ''} style="accent-color:#27ae60;width:17px;height:17px;"
+            title="Centang kalau toko ini menjual produk ini" onchange="editStoreProduct('${sp.pkey}','sold',this.checked)"></td>
       <td style="white-space:nowrap;">
-        ${thumb}
-        <label class="add-btn" style="font-size:11px;padding:4px 8px;cursor:pointer;margin-left:6px;display:inline-block;" title="Upload foto — format & ukuran bebas, tampil 16:9 di kasir">📷<input type="file" accept="image/*" style="display:none;" onchange="uploadImage(${i}, this)"></label>
-        ${p.img ? `<button class="del-btn" onclick="removeImage(${i})" title="Hapus foto">✕</button>` : ''}
+        ${m.img ? `<img src="${m.img}" style="width:48px;height:27px;object-fit:cover;border-radius:5px;vertical-align:middle;">`
+                : `<span style="font-size:16px;">${esc(m.emoji || '📦')}</span>`}
+        <span style="margin-left:6px;font-weight:500;">${esc(m.name)}</span>
+        ${v && v.name ? `<span style="color:#888;font-size:12px;"> — ${esc(v.name)}</span>` : ''}
       </td>
-      <td>
-        <input class="tbl-input" type="text" value="${esc(p.name)}" style="width:230px;" onchange="state.products[${i}].name=this.value;saveData();markProductDirty(state.products[${i}].id);scheduleProductSync();refreshPos();">
-      </td>
-      <td><input class="tbl-input" type="text" value="${esc(p.cat)}" style="width:100px;" onchange="state.products[${i}].cat=this.value;saveData();markProductDirty(state.products[${i}].id);scheduleProductSync();refreshPos();"></td>
-      <td><input class="tbl-input" type="number" value="${p.price}" step="500" style="width:110px;" onchange="state.products[${i}].price=+this.value;saveData();markProductDirty(state.products[${i}].id);scheduleProductSync();refreshPos();"></td>
-      <td><input class="tbl-input" type="number" value="${p.stock}" style="width:80px;" onchange="state.products[${i}].stock=+this.value;saveData();markProductDirty(state.products[${i}].id);scheduleProductSync();refreshPos();"></td>
-      <td><button class="del-btn" onclick="removeProduct(${i})" title="Hapus">✕</button></td>
+      <td style="color:#888;">${esc(cat ? cat.name : '-')}</td>
+      <td><input class="tbl-input" type="number" value="${sp.price || 0}" step="500" style="width:110px;" onchange="editStoreProduct('${sp.pkey}','price',this.value)"></td>
+      <td><input class="tbl-input" type="number" value="${sp.stock || 0}" style="width:90px;${(sp.stock || 0) < 0 ? 'color:#c0392b;font-weight:600;' : ''}" onchange="editStoreProduct('${sp.pkey}','stock',this.value)"></td>
+      <td style="color:#888;">${esc(m.unit || '-')}</td>
     `;
     tbody.appendChild(tr);
   });
-  document.getElementById('productCount').textContent = state.products.length + ' produk';
+  document.getElementById('productCount').textContent = rows.length + ' item · ' + branchKey();
 }
 
-function addProduct() {
-  const maxId = state.products.reduce((m, p) => Math.max(m, p.id), 0);
-  state.products.push({ id: maxId + 1, name: 'Produk Baru', emoji: '📦', cat: 'Lainnya', price: 0, stock: 0 });
+function editStoreProduct(key, field, val) {
+  const sp = spByKey(key);
+  if (!sp) return;
+  if (field === 'price' || field === 'stock') val = parseFloat(val) || 0;
+  if (field === 'price') val = Math.max(0, val);        // stok boleh minus, harga tidak
+  const before = sp[field];
+  sp[field] = val;
   saveData();
-  markProductDirty(maxId + 1);
-  scheduleProductSync();
+  if (field === 'price') logActivity('price_change', 'store_product', key, { from: before, to: val });
+  if (field === 'stock') logActivity('stock_adjust', 'store_product', key, { from: before, to: val });
+  if (field === 'sold')  logActivity('product_edit', 'store_product', key, { sold: val });
   renderProductTable();
   refreshPos();
+  syncStoreProducts();
 }
 
-async function removeProduct(i) {
-  if (!confirm('Hapus produk "' + state.products[i].name + '"?')) return;
-  const id = state.products[i].id;
-  state.products.splice(i, 1);
-  cart = cart.filter(c => c.productId !== id);
-  state.unsyncedProducts = state.unsyncedProducts.filter(pid => pid !== id);
+function toggleFav(key) {
+  const sp = spByKey(key);
+  if (!sp) return;
+  const pinned = storeRows().filter(x => x.fav).length;
+  if (!sp.fav && pinned >= 9) { alert('Maksimal 9 menu favorit. Lepas salah satu bintang dulu.'); return; }
+  sp.fav = !sp.fav;
   saveData();
   renderProductTable();
-  refreshPos();
-  if (cloudEnabled()) {
-    try { await sbFetch('/rest/v1/pos_products?pkey=eq.' + encodeURIComponent(branchKey() + ':' + id), { method: 'DELETE' }); } catch (e) {}
-  }
+  renderFavourites();
+  syncStoreProducts();
 }
 
 function refreshPos() {
@@ -2732,48 +2892,6 @@ function refreshPos() {
   renderCart();
 }
 
-// Photo upload: any format/ratio is accepted. The picture keeps its own
-// proportions in storage (only scaled down to stay small in localStorage);
-// the 16:9 look is done at display time by CSS, so nothing is cut off the file.
-function uploadImage(i, input) {
-  const file = input.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = e => {
-    const img = new Image();
-    img.onload = () => {
-      const MAX = 640;
-      const scale = Math.min(1, MAX / Math.max(img.width, img.height));
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.round(img.width * scale);
-      canvas.height = Math.round(img.height * scale);
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);   // keeps PNG transparency readable
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      state.products[i].img = canvas.toDataURL('image/jpeg', 0.78);
-      saveData();
-      markProductDirty(state.products[i].id);
-      scheduleProductSync();
-      renderProductTable();
-      refreshPos();
-    };
-    img.onerror = () => alert('File itu tidak bisa dibaca sebagai gambar. Coba foto lain (JPG/PNG/HEIC/WebP).');
-    img.src = e.target.result;
-  };
-  reader.readAsDataURL(file);
-}
-
-function removeImage(i) {
-  delete state.products[i].img;
-  saveData();
-  markProductDirty(state.products[i].id);
-  scheduleProductSync();
-  renderProductTable();
-  refreshPos();
-}
-
-// ── RIWAYAT PAGE ──────────────────────────────────────────────────────────
 function renderHistory() {
   const wrap = document.getElementById('trxList');
   document.getElementById('trxCount').textContent = state.transactions.length + ' transaksi';
@@ -2803,7 +2921,7 @@ function renderHistory() {
         <button class="del-btn" title="Hapus transaksi ini (salah input)" onclick="event.stopPropagation();voidTransaction(${i})">✕</button>
       </div>
       <div class="trx-detail" id="trxDetail${i}">
-        ${trx.items.map(it => `<div class="r-row"><span>${esc(it.name)} x${it.qty}</span><span>${fmt(it.price*it.qty)}</span></div>`).join('')}
+        ${trx.items.map(it => `<div class="r-row"><span>${esc(it.name)}${it.variantName ? ' ' + esc(it.variantName) : ''} x${it.qty}</span><span>${fmt(it.price*it.qty)}</span></div>`).join('')}
         ${trx.discount > 0 ? `<div class="r-row"><span>Diskon</span><span>-${fmt(trx.discount)}</span></div>` : ''}
         ${trx.tax > 0 ? `<div class="r-row"><span>Pajak PB1</span><span>${fmt(trx.tax)}</span></div>` : ''}
       </div>
@@ -2850,7 +2968,14 @@ function renderReport() {
   document.getElementById('resetCloudNote').style.display = cloudEnabled() ? 'inline' : 'none';
 
   // Stok minus — hanya pengingat, tidak pernah memblokir penjualan
-  const neg = state.products.filter(p => p.stock < 0).sort((a, b) => a.stock - b.stock);
+  const neg = storeRows().filter(sp => (sp.stock || 0) < 0)
+    .map(sp => {
+      const m = state.master.find(x => x.id === sp.productId) || {};
+      const v = state.variants.find(x => x.id === sp.variantId);
+      const cat = state.categories.find(c => c.id === m.categoryId);
+      return { name: (m.name || '?') + (v && v.name ? ' — ' + v.name : ''), cat: cat ? cat.name : '-', stock: sp.stock };
+    })
+    .sort((a, b) => a.stock - b.stock);
   document.getElementById('negStockSection').style.display = neg.length ? '' : 'none';
   if (neg.length) {
     document.getElementById('negStockCount').textContent = neg.length + ' produk';
@@ -2858,7 +2983,7 @@ function renderReport() {
       '<table><thead><tr><th>Produk</th><th>Kategori</th><th>Stok</th></tr></thead><tbody>' +
       neg.map(p => `<tr>
         <td style="font-weight:500;">${esc(p.name)}</td>
-        <td style="color:#888;">${esc(p.cat || '-')}</td>
+        <td style="color:#888;">${esc(p.cat)}</td>
         <td style="font-weight:600;color:#c0392b;">${p.stock}</td>
       </tr>`).join('') + '</tbody></table>';
   }
@@ -2921,12 +3046,15 @@ async function voidTransaction(i) {
   if (!confirm('Hapus transaksi ' + trx.id + ' — ' + fmt(trx.total) + '?\n\n' + itemLines + '\n\nStok barang akan dikembalikan.\nTindakan ini tidak bisa dibatalkan.')) return;
 
   // put the stock back (matched by product name; skipped if the product was deleted/renamed)
+  // Dicocokkan lewat id, bukan nama, supaya produk yang di-rename tetap benar.
   let restored = 0, missing = 0;
   trx.items.forEach(it => {
-    const p = state.products.find(p => p.name === it.name);
-    if (p) { p.stock += it.qty; markProductDirty(p.id); restored++; } else { missing++; }
+    const sp = it.productId != null
+      ? state.storeProducts.find(x => x.storeId === branchKey() && x.productId === it.productId && x.variantId === it.variantId)
+      : storeRows().find(x => { const m = state.master.find(mm => mm.id === x.productId); return m && m.name === it.name; });
+    if (sp) { sp.stock += it.qty; restored++; } else { missing++; }
   });
-  scheduleProductSync();
+  syncStoreProducts();
 
   state.transactions.splice(i, 1);
   state.unsynced = state.unsynced.filter(u => u !== trx.uid);
@@ -3125,7 +3253,10 @@ function scheduleProductSync() {
   updateCloudBadge();
 }
 
-async function syncProducts() {
+// Sejak store_products jadi sumber kebenaran, sinkron produk diarahkan ke sana.
+async function syncProducts() { return syncStoreProducts(); }
+
+async function syncProductsLegacy() {
   if (!cloudEnabled() || state.unsyncedProducts.length === 0) { updateCloudBadge(); return; }
   const rows = state.products.filter(p => state.unsyncedProducts.includes(p.id)).map(productToRow);
   if (rows.length === 0) { state.unsyncedProducts = []; saveData(); updateCloudBadge(); return; }
@@ -3162,26 +3293,59 @@ async function cloudPull() {
   if (!cloudEnabled()) { status.innerHTML = '<span style="color:#c0392b;">Isi URL dan key dulu, lalu Simpan &amp; Tes.</span>'; return; }
   status.textContent = 'Mengambil data…';
 
-  // products first, so pulled transactions line up with the right menu
+  // Master (global) dulu, lalu pengaturan toko ini — supaya produk yang ditarik
+  // punya nama, kategori, dan varian yang benar sebelum harganya dipasang.
   let prodMsg = '';
   try {
-    const pres = await sbFetch('/rest/v1/pos_products?select=*&branch=eq.' + encodeURIComponent(branchKey()) + '&order=id');
-    if (pres.ok) {
-      const prows = await pres.json();
-      let pAdded = 0, pUpdated = 0;
-      prows.forEach(r => {
-        const local = state.products.find(p => p.id === r.id);
-        const incoming = {
-          id: r.id, name: r.name, cat: r.cat, emoji: r.emoji || '📦',
-          price: +r.price, stock: +r.stock, fav: !!r.fav,
-        };
-        if (r.img) incoming.img = r.img;
-        if (local) { Object.assign(local, incoming); pUpdated++; }
-        else { state.products.push(incoming); pAdded++; }
-      });
-      if (prows.length) prodMsg = ' Produk: ' + pAdded + ' baru, ' + pUpdated + ' diperbarui.';
+    const [cres, pres, vres] = await Promise.all([
+      sbFetch('/rest/v1/categories?select=*'),
+      sbFetch('/rest/v1/products?select=*'),
+      sbFetch('/rest/v1/product_variants?select=*'),
+    ]);
+    if (cres.ok) {
+      const rows = await cres.json();
+      if (rows.length) state.categories = rows.map(r => ({
+        id: r.id, parentId: r.parent_id, name: r.name, emoji: r.emoji || '',
+        sortOrder: r.sort_order || 0, active: r.active !== false,
+      }));
     }
-  } catch (e) { /* products are optional — carry on to transactions */ }
+    if (pres.ok) {
+      const rows = await pres.json();
+      if (rows.length) {
+        state.master = rows.map(r => ({
+          id: r.id, sku: r.sku || '', name: r.name, categoryId: r.category_id,
+          emoji: r.emoji || '📦', img: r.img || '', unit: r.unit || '',
+          defaultPrice: +r.default_price || 0, active: r.active !== false,
+        }));
+        prodMsg = ' Master: ' + rows.length + ' produk.';
+      }
+    }
+    if (vres.ok) {
+      const rows = await vres.json();
+      if (rows.length) state.variants = rows.map(r => ({
+        id: r.id, productId: r.product_id, name: r.name || '', sku: r.sku || '',
+        sortOrder: r.sort_order || 0, active: r.active !== false,
+      }));
+    }
+
+    // store_products hanya untuk toko perangkat ini (owner boleh semua)
+    const all = document.getElementById('pullAllBranches') && document.getElementById('pullAllBranches').checked;
+    const spScope = all ? '' : '&store_id=eq.' + encodeURIComponent(branchKey());
+    const spres = await sbFetch('/rest/v1/store_products?select=*' + spScope);
+    if (spres.ok) {
+      const rows = await spres.json();
+      rows.forEach(r => {
+        const incoming = {
+          pkey: r.pkey, storeId: r.store_id, productId: r.product_id, variantId: r.variant_id,
+          sold: r.sold !== false, price: +r.price || 0, stock: +r.stock || 0, fav: !!r.fav,
+        };
+        const i = state.storeProducts.findIndex(sp => sp.pkey === r.pkey);
+        if (i >= 0) state.storeProducts[i] = incoming; else state.storeProducts.push(incoming);
+      });
+      if (rows.length) prodMsg += ' Toko: ' + rows.length + ' item.';
+    }
+    ensureStoreRows();
+  } catch (e) { /* master opsional — lanjut ke pelanggan & transaksi */ }
 
   // Pelanggan bersifat global (milik brand, bukan cabang), jadi TIDAK disaring
   // per toko: member yang daftar di toko A langsung dikenali di toko B.
@@ -3228,7 +3392,7 @@ async function cloudPull() {
     });
     state.transactions.sort((a, b) => new Date(b.time) - new Date(a.time));
     saveData();
-    renderHistory(); renderReport(); renderProductTable(); renderCustomerPage(); refreshPos();
+    renderHistory(); renderReport(); renderProductTable(); renderCustomerPage(); renderMaster(); renderCategories(); refreshPos();
     status.innerHTML = '<span style="color:#27ae60;">✓ ' + added + ' transaksi baru diambil (total ' + state.transactions.length + ').' + prodMsg + custMsg + '</span>';
   } catch (e) {
     status.innerHTML = '<span style="color:#c0392b;">Gagal mengambil data. Cek koneksi / URL / key.</span>';
@@ -3238,10 +3402,11 @@ async function cloudPull() {
 async function cloudPushProducts() {
   const status = document.getElementById('cloudStatus');
   if (!cloudEnabled()) { status.innerHTML = '<span style="color:#c0392b;">Isi URL dan key dulu, lalu Simpan &amp; Tes.</span>'; return; }
-  if (!confirm('Kirim ' + state.products.length + ' produk dari perangkat ini ke cloud?\n\nMenu di cloud akan ditimpa dengan menu di perangkat ini.')) return;
+  if (!confirm('Kirim master produk dan pengaturan toko ini ke cloud?\n\nData di cloud akan ditimpa dengan yang ada di perangkat ini.')) return;
   status.textContent = 'Mengirim produk…';
-  queueAllProductsForSync();
-  await syncProducts();
+  await syncMaster();
+  await syncStoreProducts();
+  state.unsyncedProducts = [];
   status.innerHTML = state.unsyncedProducts.length === 0
     ? '<span style="color:#27ae60;">✓ ' + state.products.length + ' produk terkirim ke cloud.</span>'
     : '<span style="color:#c0392b;">Sebagian gagal terkirim (' + state.unsyncedProducts.length + ' antre). Cek koneksi, lalu coba lagi.</span>';
@@ -3372,6 +3537,8 @@ function exportCSV() {
 document.getElementById('appVersion').textContent = APP_VERSION;
 normalizeCustomerKeys();
 bootstrapMaster();
+bootstrapStoreProducts();
+ensureStoreRows();
 renderBranding();
 renderCashier();
 applyRoleVisibility();

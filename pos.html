@@ -538,6 +538,7 @@
       <div class="section-title">
         Hak Akses
         <span class="badge" id="roleBadge">—</span>
+        <span class="badge" id="versionBadge" style="margin-left:auto;"></span>
       </div>
       <p style="font-size:13px;color:#555;line-height:1.6;margin-bottom:12px;">
         <b>Kasir</b> hanya bisa melayani penjualan, melihat &amp; membetulkan orderan.
@@ -585,7 +586,7 @@
     </div>
   </div>
 
-  <div class="footer">MUGI POS · Aplikasi POS MUGI · Data tersimpan di browser ini</div>
+  <div class="footer">MUGI POS · Aplikasi POS MUGI · Data tersimpan di browser ini · <span id="appVersion"></span></div>
 </div>
 
 <!-- ═══ PAYMENT MODAL ═══ -->
@@ -765,6 +766,7 @@ alter table pos_products add column if not exists fav boolean;</textarea>
 <script>
 // ── DATA ──────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'elva_pos_v1';
+const APP_VERSION = 'v6 · 2026-08-16';   // shown in Profile so the live build is identifiable
 
 const defaultProducts = [
   { id: 1,  name: 'Kopi Susu Gula Aren', emoji: '🧋', cat: 'Minuman', price: 22000, stock: 50 },
@@ -1009,6 +1011,8 @@ function applyRoleVisibility() {
 
   const badge = document.getElementById('roleBadge');
   if (badge) badge.textContent = open ? 'Manajemen' : 'Kasir';
+  const vb = document.getElementById('versionBadge');
+  if (vb) vb.textContent = APP_VERSION;
   const ub = document.getElementById('mgrUnlockBtn'), lb = document.getElementById('mgrLockBtn');
   if (ub) ub.style.display = open ? 'none' : '';
   if (lb) lb.style.display = open && state.settings.managerPin ? '' : 'none';
@@ -2156,6 +2160,7 @@ function exportCSV() {
 }
 
 // ── INIT ──────────────────────────────────────────────────────────────────
+document.getElementById('appVersion').textContent = APP_VERSION;
 renderBranding();
 renderCashier();
 applyRoleVisibility();

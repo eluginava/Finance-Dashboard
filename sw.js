@@ -1,5 +1,5 @@
 // MUGI POS service worker — keeps the till working when the wifi drops.
-const CACHE = 'mugi-pos-v1';
+const CACHE = 'mugi-pos-v2';
 
 // Same-origin files that make up the app shell. The POS lives at pos.html on
 // GitHub Pages and at index.html on custom hosting, so both are attempted and
@@ -34,6 +34,23 @@ self.addEventListener('fetch', event => {
   if (url.hostname.endsWith('.supabase.co')) return;      // always hit the network for data
 
   event.respondWith((async () => {
+    // Page loads go to the network first, so a freshly uploaded version shows
+    // up straight away instead of one reload later. The cache is the fallback
+    // when the shop's internet is down.
+    if (req.mode === 'navigate') {
+      try {
+        const fresh = await fetch(req);
+        if (fresh && fresh.ok) {
+          const clone = fresh.clone();
+          caches.open(CACHE).then(c => c.put(req, clone));
+          return fresh;
+        }
+      } catch (e) { /* offline — fall through to the cache below */ }
+      return (await caches.match(req, { ignoreSearch: true })) ||
+             (await caches.match('pos.html')) || (await caches.match('index.html')) ||
+             (await caches.match('./')) || Response.error();
+    }
+
     const cached = await caches.match(req, { ignoreSearch: true });
     if (cached) {
       // refresh in the background so the next open has the newest build

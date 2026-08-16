@@ -1048,7 +1048,7 @@ create index if not exists pos_transactions_branch_idx on pos_transactions (bran
 <script>
 // ── DATA ──────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'elva_pos_v1';
-const APP_VERSION = 'v15 · 2026-08-16';   // shown in Profile so the live build is identifiable
+const APP_VERSION = 'v16 · 2026-08-16';   // shown in Profile so the live build is identifiable
 
 const defaultProducts = [
   { id: 1,  name: 'Kopi Susu Gula Aren', emoji: '🧋', cat: 'Minuman', price: 22000, stock: 50 },
@@ -2397,7 +2397,8 @@ function shiftSummary() {
   if (!state.shiftStart) return null;
   const from = new Date(state.shiftStart);
   const mine = state.transactions.filter(t =>
-    t.cashier === state.cashier && new Date(t.time) >= from && (t.branch || branchKey()) === branchKey());
+    t.status !== 'void' && t.cashier === state.cashier &&
+    new Date(t.time) >= from && (t.branch || branchKey()) === branchKey());
   const sum = (f) => mine.reduce((s, t) => s + f(t), 0);
   // Nilai per metode diambil dari payments supaya transaksi bayar terpisah
   // terhitung benar di masing-masing metode.
@@ -3055,6 +3056,11 @@ function confirmPayment() {
     channel: channel, ref: online ? document.getElementById('refInput').value.trim() : '',
     commission: 0, net: t.total,
     cashier: state.cashier,
+    userId: state.session ? state.session.userId : '',
+    shiftId: state.shiftId || '',
+    deviceId: state.deviceId,
+    appVersion: APP_VERSION,
+    status: 'completed',
     branch: branchKey(),
     custName: custName, custPhone: custPhone,
     voucher: activeVoucher ? activeVoucher.code : '', voucherCut: t.voucherCut || 0,
@@ -3265,21 +3271,25 @@ function renderHistory() {
       String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
     const mClass = { Tunai: 'm-tunai', QRIS: 'm-qris', Kartu: 'm-kartu', GoFood: 'm-gofood', GrabFood: 'm-grabfood' }[trx.method] || 'm-tunai';
     const refStr = trx.ref ? ' · #' + esc(trx.ref) : '';
+    const voided = trx.status === 'void';
     const div = document.createElement('div');
     div.className = 'trx-item';
+    if (voided) div.style.opacity = '0.55';
     div.innerHTML = `
       <div class="trx-head">
         <div>
-          <div class="trx-id">${trx.id}</div>
+          <div class="trx-id" style="${voided ? 'text-decoration:line-through;' : ''}">${trx.id}${
+            voided ? ' <span class="badge" style="background:#ffebee;color:#c62828;border-color:#ffcdd2;">BATAL</span>' : ''}</div>
           <div class="trx-time">${timeStr} · ${trx.items.reduce((s,it)=>s+it.qty,0)} item${refStr}${trx.cashier ? ' · 🧑‍🍳 ' + esc(trx.cashier) : ''}${trx.reprintCount ? ' · 🖨 ' + trx.reprintCount + 'x' : ''}</div>
         </div>
         <span class="trx-method ${mClass}">${trx.method}</span>
         <div class="trx-total">${fmt(trx.total)}</div>
         <button class="add-btn" style="font-size:11px;padding:4px 10px;" title="Cetak ulang struk"
           onclick="event.stopPropagation();reprintTransaction(${i})">🖨</button>
-        <button class="del-btn" title="Hapus transaksi ini (salah input)" onclick="event.stopPropagation();voidTransaction(${i})">✕</button>
+        ${voided ? '' : `<button class="del-btn" title="Batalkan transaksi ini" onclick="event.stopPropagation();voidTransaction(${i})">✕</button>`}
       </div>
       <div class="trx-detail" id="trxDetail${i}">
+        ${voided ? `<div style="color:#c62828;font-size:12px;margin-bottom:6px;">Dibatalkan ${new Date(trx.voidedAt).toLocaleString('id-ID',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})} oleh ${esc(trx.voidedBy || '-')} — ${esc(trx.voidReason || '')}</div>` : ''}
         ${trx.items.map(it => `<div class="r-row"><span>${esc(it.name)}${it.variantName ? ' ' + esc(it.variantName) : ''} x${it.qty}</span><span>${fmt(it.price*it.qty)}</span></div>`).join('')}
         ${trx.discount > 0 ? `<div class="r-row"><span>Diskon</span><span>-${fmt(trx.discount)}</span></div>` : ''}
         ${trx.tax > 0 ? `<div class="r-row"><span>Pajak PB1</span><span>${fmt(trx.tax)}</span></div>` : ''}
@@ -3311,8 +3321,10 @@ function renderReport() {
   const branchPick = branches.length > 1 ? sel.value : '';
   const inBranch = t => !branchPick || (t.branch || '') === branchPick;
 
-  const todayTrx = state.transactions.filter(t => inBranch(t) && dayKey(new Date(t.time)) === todayStr);
-  const weekTrx  = state.transactions.filter(t => inBranch(t) && new Date(t.time) >= weekAgo);
+  // Transaksi batal tidak boleh ikut menghitung omzet.
+  const live = t => t.status !== 'void';
+  const todayTrx = state.transactions.filter(t => live(t) && inBranch(t) && dayKey(new Date(t.time)) === todayStr);
+  const weekTrx  = state.transactions.filter(t => live(t) && inBranch(t) && new Date(t.time) >= weekAgo);
 
   const todayTotal = todayTrx.reduce((s,t) => s + t.total, 0);
   const weekTotal  = weekTrx.reduce((s,t) => s + t.total, 0);
@@ -3401,13 +3413,29 @@ function renderReport() {
 }
 
 // ── HAPUS SATU TRANSAKSI (salah input) ────────────────────────────────────
+// Void bukan hapus: transaksi ditandai batal beserta alasannya supaya jejak
+// auditnya tetap ada. Laporan mengabaikan yang batal.
 async function voidTransaction(i) {
   const trx = state.transactions[i];
   if (!trx) return;
-  const itemLines = trx.items.map(it => '• ' + it.name + ' x' + it.qty).join('\n');
-  if (!confirm('Hapus transaksi ' + trx.id + ' — ' + fmt(trx.total) + '?\n\n' + itemLines + '\n\nStok barang akan dikembalikan.\nTindakan ini tidak bisa dibatalkan.')) return;
+  if (trx.status === 'void') { alert('Transaksi ini sudah dibatalkan.'); return; }
 
-  // put the stock back (matched by product name; skipped if the product was deleted/renamed)
+  // Kasir hanya boleh membatalkan transaksinya sendiri, hari ini.
+  if (!isManager()) {
+    const mine = state.session && trx.userId === state.session.userId;
+    const today = dayKey(new Date(trx.time)) === dayKey(new Date());
+    if (!mine || !today) {
+      alert('Kasir hanya bisa membatalkan transaksi miliknya sendiri hari ini.\nMinta Manager atau Owner untuk yang lain.');
+      return;
+    }
+  }
+
+  const itemLines = trx.items.map(it => '• ' + it.name + (it.variantName ? ' ' + it.variantName : '') + ' x' + it.qty).join('\n');
+  if (!confirm('Batalkan transaksi ' + trx.id + ' — ' + fmt(trx.total) + '?\n\n' + itemLines +
+               '\n\nStok dikembalikan dan transaksi ditandai BATAL.\nBarisnya tetap tersimpan sebagai jejak.')) return;
+  const reason = (prompt('Alasan pembatalan (mis. salah input, pembeli batal):') || '').trim();
+  if (!reason) { alert('Alasan wajib diisi.'); return; }
+
   // Dicocokkan lewat id, bukan nama, supaya produk yang di-rename tetap benar.
   let restored = 0, missing = 0;
   trx.items.forEach(it => {
@@ -3418,31 +3446,33 @@ async function voidTransaction(i) {
   });
   syncStoreProducts();
 
-  state.transactions.splice(i, 1);
-  state.unsynced = state.unsynced.filter(u => u !== trx.uid);
-  saveData();
-  logActivity('void', 'transaction', trx.id, { total: trx.total });
+  trx.status = 'void';
+  trx.voidedAt = new Date().toISOString();
+  trx.voidedBy = state.session ? state.session.name : state.cashier;
+  trx.voidReason = reason;
 
-  let cloudMsg = '';
-  if (cloudEnabled() && trx.uid) {
-    try {
-      const res = await sbFetch('/rest/v1/pos_transactions?uid=eq.' + encodeURIComponent(trx.uid), { method: 'DELETE' });
-      cloudMsg = res.ok
-        ? '\n\nData di cloud ikut terhapus.'
-        : '\n\nCatatan: baris di Supabase belum bisa dihapus (izin delete belum aktif). Hapus manual lewat Table Editor, atau jalankan SQL izin delete yang ada di menu ☁️.';
-    } catch (e) {
-      cloudMsg = '\n\nCatatan: sedang offline — hapus juga baris ini di Supabase nanti.';
-    }
+  // Kunjungan & belanja member ikut dikurangi supaya statistiknya tidak palsu.
+  const ph = normalizePhone(trx.custPhone);
+  if (ph && state.customers[ph]) {
+    const c = state.customers[ph];
+    c.visits = Math.max(0, (c.visits || 0) - 1);
+    c.spent = Math.max(0, (c.spent || 0) - trx.total);
+    syncCustomers();
   }
+
+  if (!state.unsynced.includes(trx.uid)) state.unsynced.push(trx.uid);
+  saveData();
+  logActivity('void', 'transaction', trx.id, { total: trx.total, reason });
 
   renderHistory();
   renderReport();
   refreshPos();
+  renderCashier();
   updateCloudBadge();
-  alert('Transaksi ' + trx.id + ' dihapus.' +
-    (restored ? '\nStok ' + restored + ' produk dikembalikan.' : '') +
-    (missing ? '\n' + missing + ' produk tidak ditemukan (sudah dihapus/ganti nama), stoknya tidak diubah.' : '') +
-    cloudMsg);
+  syncNow();
+  alert('Transaksi ' + trx.id + ' dibatalkan.' +
+    (restored ? '\nStok ' + restored + ' item dikembalikan.' : '') +
+    (missing ? '\n' + missing + ' item tidak ditemukan, stoknya tidak diubah.' : ''));
 }
 
 // ── RESET ─────────────────────────────────────────────────────────────────
@@ -3496,7 +3526,7 @@ function renderReportCharts(weekTrx, inBranch) {
     const d = new Date(); d.setDate(d.getDate() - i);
     const key = dayKey(d);
     labels.push(days[d.getDay()].slice(0,3) + ' ' + d.getDate());
-    data.push(state.transactions.filter(t => inBranch(t) && dayKey(new Date(t.time)) === key).reduce((s,t) => s + t.total, 0) / 1000);
+    data.push(state.transactions.filter(t => t.status !== 'void' && inBranch(t) && dayKey(new Date(t.time)) === key).reduce((s,t) => s + t.total, 0) / 1000);
   }
   if (salesChartObj) salesChartObj.destroy();
   salesChartObj = new Chart(document.getElementById('salesChart').getContext('2d'), {
@@ -3560,6 +3590,9 @@ function trxToRow(t) {
     uid: t.uid, trx_id: t.id, time: t.time,
     channel: t.channel || 'Toko', method: t.method, ref: t.ref || '', cashier: t.cashier || '',
     branch: t.branch || branchKey(), cust_name: t.custName || '', cust_phone: t.custPhone || '', voucher: t.voucher || '',
+    status: t.status || 'completed', voided_at: t.voidedAt || null, voided_by: t.voidedBy || '',
+    void_reason: t.voidReason || '', user_id: t.userId || '', shift_id: t.shiftId || '',
+    device_id: t.deviceId || '', app_version: t.appVersion || '', payments: t.payments || null,
     subtotal: t.subtotal, discount: t.discount, tax: t.tax, total: t.total,
     commission: t.commission || 0, net: t.net != null ? t.net : t.total,
     items: t.items,
@@ -3876,7 +3909,7 @@ async function copySchemaSql() {
 function exportCSV() {
   if (state.transactions.length === 0) { alert('Belum ada transaksi.'); return; }
   const esc2 = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-  const header = ['No Transaksi','Waktu','Kasir','Cabang','Kanal','Metode','No Pesanan','Nama Pemesan','No HP','Voucher','Item','Subtotal','Diskon','Potongan Voucher','Pajak','Total'];
+  const header = ['No Transaksi','Waktu','Kasir','Cabang','Kanal','Metode','No Pesanan','Nama Pemesan','No HP','Voucher','Item','Subtotal','Diskon','Potongan Voucher','Pajak','Total','Status','Alasan Batal'];
   const lines = [header.join(',')];
   state.transactions.forEach(t => {
     lines.push([
@@ -3885,6 +3918,7 @@ function exportCSV() {
       esc2(t.custName || ''), esc2(t.custPhone || ''), esc2(t.voucher || ''),
       esc2(t.items.map(it => it.name + ' x' + it.qty).join('; ')),
       t.subtotal, t.discount, t.voucherCut || 0, t.tax, t.total,
+      esc2(t.status === 'void' ? 'BATAL' : 'Selesai'), esc2(t.voidReason || ''),
     ].join(','));
   });
   const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });

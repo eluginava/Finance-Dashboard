@@ -109,6 +109,15 @@
   .channel-chip.active.grabfood { border-color: #00b14f; color: #00913f; background: #f0fff7; }
   .sum-row.muted { color: #999; font-size: 12px; }
 
+  /* Panel pelanggan di keranjang */
+  .cust-panel { background: #fafafa; border: 1px solid #f0f0ec; border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; }
+  .cust-title { font-size: 12px; font-weight: 600; color: #555; margin-bottom: 8px; }
+  .cust-input { width: 100%; border: 1px solid #e5e5e0; border-radius: 7px; padding: 7px 10px; font-size: 13px; background: #fff; outline: none; font-family: inherit; margin-bottom: 6px; }
+  .cust-input:focus { border-color: #999; }
+  .cust-info { font-size: 12px; line-height: 1.5; margin-top: 6px; min-height: 16px; }
+  .cust-info.member { color: #2e7d32; font-weight: 500; }
+  .cust-info.baru { color: #888; }
+
   /* Cart */
   .cart { background: #fff; border: 1px solid #e5e5e0; border-radius: 12px; padding: 18px; position: sticky; top: 80px; }
   .cart-title { font-size: 15px; font-weight: 600; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
@@ -275,6 +284,7 @@
   <div class="tabs">
     <button class="tab-btn active" data-page="kasir" onclick="switchPage('kasir')">Kasir</button>
     <button class="tab-btn" data-page="produk" onclick="switchPage('produk')">Produk</button>
+    <button class="tab-btn mgr-only" data-page="pelanggan" onclick="switchPage('pelanggan')">Pelanggan</button>
     <button class="tab-btn" data-page="riwayat" onclick="switchPage('riwayat')">Riwayat</button>
     <button class="tab-btn" data-page="laporan" onclick="switchPage('laporan')">Laporan</button>
   </div>
@@ -319,6 +329,15 @@
           <button class="cart-clear" onclick="clearCart()">Kosongkan</button>
         </div>
         <div class="channel-chips" id="channelChips"></div>
+        <div class="cust-panel">
+          <div class="cust-title">👤 Pelanggan <span style="color:#bbb;font-weight:400;">— opsional</span></div>
+          <input class="cust-input" type="text" id="cartCustName" placeholder="Nama pelanggan">
+          <div style="display:flex;gap:6px;">
+            <input class="cust-input" type="tel" id="cartCustPhone" placeholder="No. HP" style="flex:1;margin-bottom:0;" oninput="lookupCartCustomer()">
+            <button class="qty-btn" style="width:auto;padding:0 10px;" title="Cari member" onclick="searchMemberByName()">🔍</button>
+          </div>
+          <div id="cartCustInfo" class="cust-info"></div>
+        </div>
         <div id="cartItems"></div>
         <div class="cart-summary">
           <div class="sum-row"><span>Subtotal</span><span id="cartSubtotal">Rp 0</span></div>
@@ -368,6 +387,27 @@
       <div style="margin-top:16px; text-align:right;">
         <button class="add-btn" onclick="addProduct()">+ Tambah Produk</button>
       </div>
+    </div>
+  </div>
+
+  <!-- ═══ PELANGGAN ═══ -->
+  <div class="page" id="page-pelanggan">
+    <div class="section">
+      <div class="section-title">
+        Master Pelanggan
+        <span class="badge" id="custCount">0 pelanggan</span>
+        <button class="add-btn" style="margin-left:auto;font-size:12px;padding:5px 12px;" onclick="exportCustomersCSV()">⬇ Export CSV</button>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+        <input class="tbl-input" type="text" id="custSearch" placeholder="🔍 Cari nama atau No. HP…" style="flex:1;min-width:200px;" oninput="renderCustomerPage()">
+        <select class="tbl-input" id="custSort" style="width:190px;" onchange="renderCustomerPage()">
+          <option value="spent">Urut: total belanja</option>
+          <option value="visits">Urut: jumlah kunjungan</option>
+          <option value="recent">Urut: kunjungan terakhir</option>
+          <option value="name">Urut: nama</option>
+        </select>
+      </div>
+      <div id="customerTable" style="overflow-x:auto;"></div>
     </div>
   </div>
 
@@ -682,17 +722,7 @@
       <label>No. pesanan (opsional)</label>
       <input class="txt" type="text" id="refInput" placeholder="mis. GF-1234 / GM-5678">
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:4px;">
-      <div>
-        <label>Nama pemesan (opsional)</label>
-        <input class="txt" type="text" id="custName" placeholder="mis. Bu Sri">
-      </div>
-      <div>
-        <label>No. HP / member (opsional)</label>
-        <input class="txt" type="tel" id="custPhone" placeholder="08xxxxxxxxxx" oninput="lookupCustomer()">
-      </div>
-    </div>
-    <div id="custInfo" style="font-size:12px;color:#2e7d32;margin-bottom:10px;min-height:16px;"></div>
+    <div id="payCustLine" style="font-size:13px;color:#555;background:#f5f5f3;border-radius:8px;padding:10px 12px;margin-bottom:12px;"></div>
     <div id="cashSection">
       <label>Uang diterima (Rp)</label>
       <input type="number" id="cashInput" placeholder="0" oninput="updateChange()">
@@ -705,6 +735,17 @@
     <div class="modal-actions">
       <button class="btn btn-cancel" onclick="closePayment()">Batal</button>
       <button class="btn btn-primary" id="confirmPayBtn" onclick="confirmPayment()">Selesaikan</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ DETAIL PELANGGAN ═══ -->
+<div class="modal-overlay" id="custModal">
+  <div class="modal" style="max-width:560px;">
+    <h2 id="custDetailTitle">Detail Pelanggan</h2>
+    <div id="custDetailBody"></div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeCustDetail()">Tutup</button>
     </div>
   </div>
 </div>
@@ -893,7 +934,7 @@ create index if not exists pos_transactions_branch_idx on pos_transactions (bran
 <script>
 // ── DATA ──────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'elva_pos_v1';
-const APP_VERSION = 'v10 · 2026-08-16';   // shown in Profile so the live build is identifiable
+const APP_VERSION = 'v11 · 2026-08-16';   // shown in Profile so the live build is identifiable
 
 const defaultProducts = [
   { id: 1,  name: 'Kopi Susu Gula Aren', emoji: '🧋', cat: 'Minuman', price: 22000, stock: 50 },
@@ -1407,6 +1448,217 @@ function removeVoucher(i) {
   saveData(); renderVouchers();
 }
 
+// ── PELANGGAN / MEMBER ────────────────────────────────────────────────────
+// Nomor yang sama sering diketik berbeda-beda (+62, 62, spasi, strip).
+// Semua dinormalisasi ke bentuk 08xxxx supaya satu orang = satu baris member.
+function normalizePhone(p) {
+  if (!p) return '';
+  let d = String(p).replace(/[^0-9]/g, '');
+  if (d.startsWith('62')) d = '0' + d.slice(2);
+  return d;
+}
+
+// Rapikan data lama yang kuncinya belum dinormalisasi (dan gabungkan duplikat).
+function normalizeCustomerKeys() {
+  const out = {};
+  let changed = false;
+  Object.entries(state.customers).forEach(([k, c]) => {
+    const key = normalizePhone(k);
+    if (!key) { changed = true; return; }
+    if (key !== k) changed = true;
+    if (out[key]) {
+      out[key].visits += c.visits || 0;
+      out[key].spent  += c.spent  || 0;
+      if (!out[key].name && c.name) out[key].name = c.name;
+      if ((c.lastVisit || '') > (out[key].lastVisit || '')) out[key].lastVisit = c.lastVisit;
+      changed = true;
+    } else out[key] = { ...c };
+  });
+  if (changed) { state.customers = out; saveData(); }
+}
+
+function findCustomer(phone) {
+  const key = normalizePhone(phone);
+  return key ? state.customers[key] : null;
+}
+
+// Dipanggil saat kasir mengetik No. HP di keranjang.
+function lookupCartCustomer() {
+  const info = document.getElementById('cartCustInfo');
+  const raw = document.getElementById('cartCustPhone').value;
+  const key = normalizePhone(raw);
+  if (key.length < 4) { info.className = 'cust-info'; info.textContent = ''; return; }
+  const c = state.customers[key];
+  if (c) {
+    info.className = 'cust-info member';
+    const last = c.lastVisit ? ' · terakhir ' + new Date(c.lastVisit).toLocaleDateString('id-ID') : '';
+    info.textContent = '✅ Customer sudah terdaftar — ' + (c.name || key) +
+      ' · ' + (c.visits || 0) + '× belanja · total ' + fmt(c.spent || 0) + last;
+    const nameField = document.getElementById('cartCustName');
+    if (c.name && !nameField.value.trim()) nameField.value = c.name;
+  } else {
+    info.className = 'cust-info baru';
+    info.textContent = 'Pelanggan baru — otomatis tersimpan sebagai member setelah pembayaran.';
+  }
+}
+
+function searchMemberByName() {
+  const q = (prompt('Cari member berdasarkan nama:') || '').trim().toLowerCase();
+  if (!q) return;
+  const hits = Object.entries(state.customers)
+    .filter(([ph, c]) => (c.name || '').toLowerCase().includes(q))
+    .slice(0, 10);
+  if (!hits.length) { alert('Tidak ada member dengan nama itu.'); return; }
+  const list = hits.map(([ph, c], i) => (i + 1) + '. ' + (c.name || '-') + ' — ' + ph + ' (' + (c.visits || 0) + '×)').join('\n');
+  const pick = prompt('Ketik nomor urut untuk memilih:\n\n' + list);
+  const idx = parseInt(pick, 10) - 1;
+  if (isNaN(idx) || !hits[idx]) return;
+  document.getElementById('cartCustPhone').value = hits[idx][0];
+  document.getElementById('cartCustName').value = hits[idx][1].name || '';
+  lookupCartCustomer();
+}
+
+function clearCustPanel() {
+  document.getElementById('cartCustName').value = '';
+  document.getElementById('cartCustPhone').value = '';
+  const info = document.getElementById('cartCustInfo');
+  info.className = 'cust-info'; info.textContent = '';
+}
+
+// ── TAB PELANGGAN ─────────────────────────────────────────────────────────
+// Riwayat transaksi disaring sesuai hak akses: manager/kasir hanya tokonya.
+function customerTransactions(phone) {
+  const key = normalizePhone(phone);
+  return state.transactions.filter(t =>
+    normalizePhone(t.custPhone) === key &&
+    (isOwner() || (t.branch || '') === sessionStoreId()));
+}
+
+function renderCustomerPage() {
+  const wrap = document.getElementById('customerTable');
+  if (!wrap) return;
+  const q = (document.getElementById('custSearch').value || '').toLowerCase();
+  const sort = document.getElementById('custSort').value;
+  let rows = Object.entries(state.customers)
+    .filter(([ph, c]) => ph.includes(q) || (c.name || '').toLowerCase().includes(q));
+  const cmp = {
+    spent:  (a, b) => (b[1].spent || 0) - (a[1].spent || 0),
+    visits: (a, b) => (b[1].visits || 0) - (a[1].visits || 0),
+    recent: (a, b) => String(b[1].lastVisit || '').localeCompare(String(a[1].lastVisit || '')),
+    name:   (a, b) => String(a[1].name || '').localeCompare(String(b[1].name || '')),
+  }[sort] || (() => 0);
+  rows.sort(cmp);
+  document.getElementById('custCount').textContent = Object.keys(state.customers).length + ' pelanggan';
+  wrap.innerHTML = rows.length
+    ? '<table><thead><tr><th>Nama</th><th>No. HP</th><th>Kunjungan</th><th>Total Belanja</th><th>Rata-rata</th><th>Terakhir</th></tr></thead><tbody>' +
+      rows.map(([ph, c]) => {
+        const avg = c.visits ? (c.spent || 0) / c.visits : 0;
+        return `<tr style="cursor:pointer;" onclick="openCustDetail('${esc(ph)}')">
+          <td style="font-weight:500;">${esc(c.name || '-')}</td>
+          <td>${esc(ph)}</td>
+          <td>${c.visits || 0}×</td>
+          <td style="font-weight:600;">${fmt(c.spent || 0)}</td>
+          <td style="color:#888;">${fmt(avg)}</td>
+          <td style="color:#888;">${c.lastVisit ? new Date(c.lastVisit).toLocaleDateString('id-ID') : '-'}</td>
+        </tr>`;
+      }).join('') + '</tbody></table>'
+    : '<div style="font-size:13px;color:#bbb;">Belum ada pelanggan' + (q ? ' yang cocok.' : ' tersimpan.') + '</div>';
+}
+
+function openCustDetail(phone) {
+  const c = state.customers[phone];
+  if (!c) return;
+  const trx = customerTransactions(phone);
+  const counts = {};
+  trx.forEach(t => (t.items || []).forEach(it => { counts[it.name] = (counts[it.name] || 0) + it.qty; }));
+  const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 3);
+
+  document.getElementById('custDetailTitle').textContent = (c.name || phone);
+  document.getElementById('custDetailBody').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
+      <div><label style="font-size:12px;color:#888;">Nama</label>
+        <input class="tbl-input" type="text" id="custEditName" value="${esc(c.name || '')}" style="width:100%;" onchange="saveCustField('${esc(phone)}','name',this.value)"></div>
+      <div><label style="font-size:12px;color:#888;">No. HP</label>
+        <div style="padding:7px 0;font-weight:500;">${esc(phone)}</div></div>
+      <div style="grid-column:1/-1;"><label style="font-size:12px;color:#888;">Catatan</label>
+        <input class="tbl-input" type="text" id="custEditNote" value="${esc(c.note || '')}" placeholder="mis. suka kopi tidak terlalu manis" style="width:100%;" onchange="saveCustField('${esc(phone)}','note',this.value)"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px;">
+      ${[['Kunjungan', (c.visits || 0) + '×'], ['Total belanja', fmt(c.spent || 0)],
+         ['Rata-rata', fmt(c.visits ? (c.spent || 0) / c.visits : 0)]].map(([l, v]) => `
+        <div style="background:#fafafa;border:1px solid #f0f0ec;border-radius:8px;padding:10px;text-align:center;">
+          <div style="font-size:11px;color:#888;">${l}</div>
+          <div style="font-size:15px;font-weight:600;">${v}</div>
+        </div>`).join('')}
+    </div>
+    ${top.length ? `<div style="font-size:12px;color:#555;margin-bottom:12px;">Paling sering dibeli: <b>${top.map(t => esc(t[0]) + ' (' + t[1] + ')').join(', ')}</b></div>` : ''}
+    <div style="font-size:13px;font-weight:600;margin-bottom:8px;">Riwayat Transaksi ${isOwner() ? '' : '<span style="font-weight:400;color:#888;">— toko ini saja</span>'}</div>
+    <div style="max-height:260px;overflow:auto;">
+      ${trx.length ? '<table><thead><tr><th>Tanggal</th><th>No.</th><th>Toko</th><th>Item</th><th>Total</th><th></th></tr></thead><tbody>' +
+        trx.map(t => {
+          const gi = state.transactions.indexOf(t);
+          const voided = t.status === 'void';
+          return `<tr style="${voided ? 'text-decoration:line-through;color:#bbb;' : ''}">
+            <td style="white-space:nowrap;">${new Date(t.time).toLocaleDateString('id-ID')}</td>
+            <td>${esc(t.id)}</td>
+            <td style="color:#888;">${esc(t.branch || '-')}</td>
+            <td>${(t.items || []).reduce((a, it) => a + it.qty, 0)}</td>
+            <td style="font-weight:600;">${fmt(t.total)}</td>
+            <td><button class="add-btn" style="font-size:11px;padding:3px 8px;" onclick="reprintTransaction(${gi})">🖨</button></td>
+          </tr>`;
+        }).join('') + '</tbody></table>'
+        : '<div style="font-size:13px;color:#bbb;">Belum ada transaksi.</div>'}
+    </div>`;
+  document.getElementById('custModal').classList.add('show');
+}
+
+function closeCustDetail() { document.getElementById('custModal').classList.remove('show'); }
+
+function saveCustField(phone, field, val) {
+  const c = state.customers[phone];
+  if (!c) return;
+  c[field] = String(val).trim();
+  saveData();
+  syncCustomers();
+  renderCustomerPage();
+}
+
+function exportCustomersCSV() {
+  const rows = Object.entries(state.customers);
+  if (!rows.length) { alert('Belum ada pelanggan.'); return; }
+  const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const lines = ['Nama,No HP,Kunjungan,Total Belanja,Rata-rata,Kunjungan Terakhir,Catatan'];
+  rows.forEach(([ph, c]) => lines.push([
+    q(c.name || ''), q(ph), c.visits || 0, c.spent || 0,
+    c.visits ? Math.round((c.spent || 0) / c.visits) : 0,
+    q(c.lastVisit ? new Date(c.lastVisit).toLocaleString('id-ID') : ''), q(c.note || ''),
+  ].join(',')));
+  const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'pelanggan-mugi-pos-' + dayKey(new Date()) + '.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// Member milik brand, bukan cabang — jadi TIDAK di-scope per toko.
+async function syncCustomers() {
+  if (!cloudEnabled()) return;
+  const rows = Object.entries(state.customers).map(([phone, c]) => ({
+    phone, name: c.name || '', visits: c.visits || 0, spent: c.spent || 0,
+    last_visit: c.lastVisit || null, first_store_id: c.firstStore || null,
+    note: c.note || '', updated_at: new Date().toISOString(),
+  }));
+  if (!rows.length) return;
+  try {
+    await sbFetch('/rest/v1/customers?on_conflict=phone', {
+      method: 'POST',
+      headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify(rows),
+    });
+  } catch (e) {}
+}
+
 // ── CUSTOMERS / MEMBERSHIP ────────────────────────────────────────────────
 function renderCustomers() {
   const wrap = document.getElementById('customerList');
@@ -1591,6 +1843,7 @@ function switchPage(name) {
   const btn = document.querySelector('.tab-btn[data-page="' + name + '"]');
   if (btn) btn.classList.add('active');          // 'profil' opens from the avatar, not a tab
   if (name === 'profil') { renderBranding(); renderCashier(); renderBranchInputs(); renderVouchers(); renderCustomers(); renderShiftLog(); renderUsers(); renderActivityLog(); applyRoleVisibility(); }
+  if (name === 'pelanggan') renderCustomerPage();
   if (name === 'produk') renderProductTable();
   if (name === 'riwayat') renderHistory();
   if (name === 'laporan') renderReport();
@@ -1827,9 +2080,14 @@ function openPayment() {
   const online = isOnlineChannel(channel);
   document.getElementById('methodSection').style.display = online ? 'none' : 'block';
   document.getElementById('onlineSection').style.display = online ? 'block' : 'none';
-  document.getElementById('custName').value = '';
-  document.getElementById('custPhone').value = '';
-  document.getElementById('custInfo').textContent = '';
+  const pn = document.getElementById('cartCustName').value.trim();
+  const pp = normalizePhone(document.getElementById('cartCustPhone').value);
+  const known = pp ? state.customers[pp] : null;
+  document.getElementById('payCustLine').innerHTML = pp || pn
+    ? '👤 ' + (pn || known && known.name || '-') + (pp ? ' · ' + pp : '') +
+      (known ? ' <span style="color:#2e7d32;font-weight:600;">· member terdaftar</span>'
+             : pp ? ' <span style="color:#888;">· member baru</span>' : '')
+    : '<span style="color:#888;">Tanpa data pelanggan (walk-in)</span>';
   if (online) {
     document.getElementById('onlineNote').innerHTML =
       'Pesanan <b>' + channel + '</b> — pembayaran sudah diterima lewat aplikasi ' + channel + '.<br>' +
@@ -1882,15 +2140,11 @@ function updateChange() {
   btn.disabled = change < 0;
 }
 
-function lookupCustomer() {
-  const phone = document.getElementById('custPhone').value.trim();
-  const info = document.getElementById('custInfo');
-  const c = state.customers[phone];
-  if (c) {
-    info.textContent = '⭐ Member: ' + (c.name || phone) + ' · ' + c.visits + 'x belanja · total ' + fmt(c.spent);
-    const nameField = document.getElementById('custName');
-    if (c.name && !nameField.value) nameField.value = c.name;
-  } else info.textContent = '';
+// Nomor transaksi diberi awalan kode toko supaya tidak bertabrakan antar
+// cabang — TRX-0001 di dua toko membuat komplain sulit ditelusuri.
+function trxPrefix() {
+  const code = String(sessionStoreId() || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 6);
+  return code || 'TRX';
 }
 
 function confirmPayment() {
@@ -1899,11 +2153,11 @@ function confirmPayment() {
   const cash = (!online && payMethod === 'Tunai') ? (parseFloat(document.getElementById('cashInput').value) || 0) : t.total;
   if (!online && payMethod === 'Tunai' && cash < t.total) return;
 
-  const custName = document.getElementById('custName').value.trim();
-  const custPhone = document.getElementById('custPhone').value.trim();
+  const custName = document.getElementById('cartCustName').value.trim();
+  const custPhone = normalizePhone(document.getElementById('cartCustPhone').value);
   const trx = {
     uid: Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
-    id: 'TRX-' + String(state.nextTrxNum).padStart(4, '0'),
+    id: trxPrefix() + '-' + String(state.nextTrxNum).padStart(4, '0'),
     time: new Date().toISOString(),
     items: cart.map(c => {
       const p = state.products.find(p => p.id === c.productId);
@@ -1919,14 +2173,17 @@ function confirmPayment() {
     voucher: activeVoucher ? activeVoucher.code : '', voucherCut: t.voucherCut || 0,
   };
 
-  // membership: remember the customer and their running totals
+  // Member terbentuk sendiri saat bayar; kunci = No. HP yang sudah dinormalisasi.
   if (custPhone) {
-    const c = state.customers[custPhone] || { name: '', visits: 0, spent: 0, lastVisit: '' };
+    const c = state.customers[custPhone] ||
+      { name: '', visits: 0, spent: 0, lastVisit: '', firstStore: branchKey(), note: '' };
     if (custName) c.name = custName;
     c.visits++;
     c.spent += t.total;
     c.lastVisit = trx.time;
+    if (!c.firstStore) c.firstStore = branchKey();
     state.customers[custPhone] = c;
+    syncCustomers();
   }
   state.nextTrxNum++;
   state.transactions.unshift(trx);
@@ -1945,6 +2202,7 @@ function confirmPayment() {
   channel = 'Toko';
   renderChannelChips();
   clearCart();
+  clearCustPanel();
   renderFavourites();
   syncNow();
 }
@@ -2538,6 +2796,29 @@ async function cloudPull() {
     }
   } catch (e) { /* products are optional — carry on to transactions */ }
 
+  // Pelanggan bersifat global (milik brand, bukan cabang), jadi TIDAK disaring
+  // per toko: member yang daftar di toko A langsung dikenali di toko B.
+  let custMsg = '';
+  try {
+    const cres = await sbFetch('/rest/v1/customers?select=*');
+    if (cres.ok) {
+      let cAdded = 0;
+      (await cres.json()).forEach(r => {
+        const key = normalizePhone(r.phone);
+        if (!key) return;
+        const local = state.customers[key];
+        const incoming = {
+          name: r.name || '', visits: +r.visits || 0, spent: +r.spent || 0,
+          lastVisit: r.last_visit || '', firstStore: r.first_store_id || '', note: r.note || '',
+        };
+        // ambil yang kunjungannya lebih banyak supaya data lokal tidak mundur
+        if (!local) { state.customers[key] = incoming; cAdded++; }
+        else if (incoming.visits >= (local.visits || 0)) state.customers[key] = incoming;
+      });
+      if (cAdded) custMsg = ' Pelanggan: ' + cAdded + ' baru.';
+    }
+  } catch (e) {}
+
   try {
     // A store pulls only its own sales unless the owner asks for every branch.
     const scope = document.getElementById('pullAllBranches') && document.getElementById('pullAllBranches').checked
@@ -2560,8 +2841,8 @@ async function cloudPull() {
     });
     state.transactions.sort((a, b) => new Date(b.time) - new Date(a.time));
     saveData();
-    renderHistory(); renderReport(); renderProductTable(); refreshPos();
-    status.innerHTML = '<span style="color:#27ae60;">✓ ' + added + ' transaksi baru diambil (total ' + state.transactions.length + ').' + prodMsg + '</span>';
+    renderHistory(); renderReport(); renderProductTable(); renderCustomerPage(); refreshPos();
+    status.innerHTML = '<span style="color:#27ae60;">✓ ' + added + ' transaksi baru diambil (total ' + state.transactions.length + ').' + prodMsg + custMsg + '</span>';
   } catch (e) {
     status.innerHTML = '<span style="color:#c0392b;">Gagal mengambil data. Cek koneksi / URL / key.</span>';
   }
@@ -2702,6 +2983,7 @@ function exportCSV() {
 
 // ── INIT ──────────────────────────────────────────────────────────────────
 document.getElementById('appVersion').textContent = APP_VERSION;
+normalizeCustomerKeys();
 renderBranding();
 renderCashier();
 applyRoleVisibility();

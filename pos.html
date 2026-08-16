@@ -313,6 +313,7 @@
       <span>🧑‍🍳 Kasir bertugas:</span>
       <span class="who" id="cashierNameLabel">—</span>
       <span style="color:#888;" id="shiftSince"></span>
+      <button class="swap" onclick="addCashMovement('out')">💸 Kas Keluar</button>
       <button class="swap" onclick="openShift(true)">Ganti Kasir</button>
     </div>
     <div class="pos-layout">
@@ -1047,7 +1048,7 @@ create index if not exists pos_transactions_branch_idx on pos_transactions (bran
 <script>
 // ── DATA ──────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'elva_pos_v1';
-const APP_VERSION = 'v14 · 2026-08-16';   // shown in Profile so the live build is identifiable
+const APP_VERSION = 'v15 · 2026-08-16';   // shown in Profile so the live build is identifiable
 
 const defaultProducts = [
   { id: 1,  name: 'Kopi Susu Gula Aren', emoji: '🧋', cat: 'Minuman', price: 22000, stock: 50 },
@@ -1103,6 +1104,9 @@ if (!state.variants) state.variants = [];       // varian per produk
 if (!state.storeProducts) state.storeProducts = [];  // jual/harga/stok per toko per varian
 if (!state.heldOrders) state.heldOrders = [];         // bon tersimpan, lokal per perangkat
 if (!state.deviceId) state.deviceId = 'dev-' + Math.random().toString(36).slice(2, 10);
+if (!state.cashMovements) state.cashMovements = [];   // kas masuk/keluar laci
+if (state.openingCash === undefined) state.openingCash = 0;
+if (!state.shiftId) state.shiftId = '';
 if (!state.customers) state.customers = {};   // phone -> { name, visits, spent, lastVisit }
 if (!state.settings.supabaseUrl) state.settings.supabaseUrl = '';
 if (!state.settings.supabaseKey) state.settings.supabaseKey = '';
@@ -1279,10 +1283,13 @@ async function doLogin() {
   ensureStoreRows();
   state.cashier = state.session.name;
   state.shiftStart = new Date().toISOString();
+  state.shiftId = 'sh-' + Date.now().toString(36);
   saveData();
   logActivity('login', 'user', u.id, { role: u.role });
 
   document.getElementById('loginOverlay').classList.remove('show');
+  askOpeningCash();
+
   btn.disabled = false;
   switchPage('kasir');        // siapa pun yang masuk langsung siap melayani
   applyRoleVisibility();
@@ -1427,6 +1434,68 @@ async function syncUsers() {
       method: 'POST',
       headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
       body: JSON.stringify(state.users.map(({ _sent, ...u }) => u)),
+    });
+  } catch (e) {}
+}
+
+// ── KAS LACI ──────────────────────────────────────────────────────────────
+// Modal awal laci dicatat supaya saat tutup shift bisa dicocokkan dengan uang
+// fisik; boleh dilewati kalau toko tidak memakai kas awal.
+function askOpeningCash() {
+  const inp = prompt('Kas awal di laci (uang modal sebelum jualan):\n\nKosongkan atau isi 0 kalau tidak ada.', '0');
+  state.openingCash = inp === null ? 0 : (parseFloat(inp) || 0);
+  saveData();
+  if (state.openingCash > 0) logActivity('shift_open', 'shift', state.shiftId, { opening: state.openingCash });
+  renderCashier();
+}
+
+function addCashMovement(type) {
+  if (!state.cashier) { alert('Belum ada kasir yang bertugas.'); return; }
+  const label = type === 'out' ? 'Kas keluar' : 'Kas masuk';
+  const amt = parseFloat(prompt(label + ' — jumlah (Rp):', '0') || '0') || 0;
+  if (amt <= 0) return;
+  const note = (prompt(label + ' — keterangan (mis. beli galon, parkir):') || '').trim();
+  state.cashMovements.unshift({
+    id: 'cm-' + Date.now().toString(36),
+    shiftId: state.shiftId, storeId: branchKey(),
+    userId: state.session ? state.session.userId : '',
+    type, amount: amt, note, createdAt: new Date().toISOString(),
+  });
+  saveData();
+  logActivity(type === 'out' ? 'cash_out' : 'cash_in', 'cash', state.shiftId, { amount: amt, note });
+  renderCashier();
+  syncCashMovements();
+  alert(label + ' ' + fmt(amt) + ' dicatat.' + (note ? '\n' + note : ''));
+}
+
+async function syncCashMovements() {
+  if (!cloudEnabled() || !state.cashMovements.length) return;
+  try {
+    await sbFetch('/rest/v1/cash_movements?on_conflict=id', {
+      method: 'POST',
+      headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify(state.cashMovements.slice(0, 200).map(m => ({
+        id: m.id, shift_id: m.shiftId, store_id: m.storeId, user_id: m.userId,
+        type: m.type, amount: m.amount, note: m.note, created_at: m.createdAt,
+      }))),
+    });
+  } catch (e) {}
+}
+
+async function syncShifts() {
+  if (!cloudEnabled() || !state.shifts.length) return;
+  try {
+    await sbFetch('/rest/v1/shifts?on_conflict=id', {
+      method: 'POST',
+      headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify(state.shifts.filter(sh => sh.id).slice(0, 100).map(sh => ({
+        id: sh.id, store_id: sh.branch, user_id: sh.userId || '', cashier_name: sh.cashier,
+        started_at: sh.start, ended_at: sh.end,
+        opening_cash: sh.opening || 0, trx_count: sh.count || 0, item_count: sh.items || 0,
+        total: sh.total || 0, cash: sh.cash || 0, qris: sh.qris || 0, card: sh.card || 0,
+        online: sh.online || 0, cash_in: sh.cashIn || 0, cash_out: sh.cashOut || 0,
+        expected_cash: sh.expected || 0, counted_cash: sh.counted, variance: sh.variance,
+      }))),
     });
   } catch (e) {}
 }
@@ -2287,7 +2356,9 @@ function renderCashier() {
   const since = document.getElementById('shiftSince');
   if (name && state.shiftStart) {
     const d = new Date(state.shiftStart);
-    since.textContent = '· sejak ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+    const s = shiftSummary();
+    since.textContent = '· sejak ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') +
+      (s ? ' · laci ' + fmt(s.expected) : '');
   } else since.textContent = '';
 
   const badge = document.getElementById('shiftBadge');
@@ -2328,14 +2399,27 @@ function shiftSummary() {
   const mine = state.transactions.filter(t =>
     t.cashier === state.cashier && new Date(t.time) >= from && (t.branch || branchKey()) === branchKey());
   const sum = (f) => mine.reduce((s, t) => s + f(t), 0);
+  // Nilai per metode diambil dari payments supaya transaksi bayar terpisah
+  // terhitung benar di masing-masing metode.
+  const byMethod = m => sum(t => (t.payments && t.payments.length)
+    ? t.payments.filter(p => p.method === m).reduce((a, p) => a + p.amount, 0)
+    : (t.method === m ? t.total : 0));
+
+  const moves = state.cashMovements.filter(mv => mv.shiftId === state.shiftId);
+  const cashIn  = moves.filter(mv => mv.type === 'in').reduce((a, mv) => a + mv.amount, 0);
+  const cashOut = moves.filter(mv => mv.type === 'out').reduce((a, mv) => a + mv.amount, 0);
+  const cash = byMethod('Tunai');
+  const opening = state.openingCash || 0;
+
   return {
     from, count: mine.length,
     total: sum(t => t.total),
-    cash: sum(t => t.method === 'Tunai' ? t.total : 0),
-    qris: sum(t => t.method === 'QRIS' ? t.total : 0),
-    card: sum(t => t.method === 'Kartu' ? t.total : 0),
+    cash, qris: byMethod('QRIS'), card: byMethod('Kartu'),
     online: sum(t => isOnlineChannel(t.channel) ? t.total : 0),
     items: sum(t => t.items.reduce((a, it) => a + it.qty, 0)),
+    opening, cashIn, cashOut,
+    expected: opening + cash + cashIn - cashOut,
+    moves,
   };
 }
 
@@ -2351,15 +2435,39 @@ function endShift() {
     'Durasi  : ' + hh + ' jam ' + mm + ' menit',
     'Transaksi: ' + (s ? s.count : 0) + ' (' + (s ? s.items : 0) + ' item)',
     '',
-    'Tunai   : ' + fmt(s ? s.cash : 0) + '   <- uang di laci',
+    'PENJUALAN',
+    'Tunai   : ' + fmt(s ? s.cash : 0),
     'QRIS    : ' + fmt(s ? s.qris : 0),
     'Kartu   : ' + fmt(s ? s.card : 0),
     'Online  : ' + fmt(s ? s.online : 0),
     'TOTAL   : ' + fmt(s ? s.total : 0),
     '',
-    'Akhiri shift sekarang?',
+    'UANG LACI',
+    'Kas awal    : ' + fmt(s ? s.opening : 0),
+    'Penjualan tunai: ' + fmt(s ? s.cash : 0),
+    'Kas masuk   : ' + fmt(s ? s.cashIn : 0),
+    'Kas keluar  : -' + fmt(s ? s.cashOut : 0),
+    'SEHARUSNYA  : ' + fmt(s ? s.expected : 0),
+    '',
+    'Lanjut hitung uang di laci?',
   ];
   if (!confirm(lines.join('\n'))) return false;
+
+  // Hitungan fisik laci: kosongkan kalau tidak mau dicocokkan sekarang.
+  let counted = null, variance = null;
+  if (s) {
+    const inp = prompt('Berapa uang tunai yang benar-benar ada di laci?\n\n' +
+      'Seharusnya: ' + fmt(s.expected) + '\n(kosongkan kalau tidak dihitung sekarang)', String(s.expected));
+    if (inp === null) return false;
+    if (String(inp).trim() !== '') {
+      counted = parseFloat(inp) || 0;
+      variance = counted - s.expected;
+      alert(variance === 0
+        ? '✅ Uang laci cocok: ' + fmt(counted)
+        : (variance > 0 ? '⚠️ LEBIH ' : '⚠️ KURANG ') + fmt(Math.abs(variance)) +
+          '\n\nSeharusnya ' + fmt(s.expected) + ', dihitung ' + fmt(counted) + '.');
+    }
+  }
 
   if (s) {
     if (!state.shifts) state.shifts = [];
@@ -2372,18 +2480,24 @@ if (!state.variants) state.variants = [];       // varian per produk
 if (!state.storeProducts) state.storeProducts = [];  // jual/harga/stok per toko per varian
 if (!state.deviceId) state.deviceId = 'dev-' + Math.random().toString(36).slice(2, 10);
     state.shifts.unshift({
-      cashier: state.cashier, branch: branchKey(),
+      id: state.shiftId, cashier: state.cashier, branch: branchKey(),
+      opening: s.opening, cashIn: s.cashIn, cashOut: s.cashOut,
+      expected: s.expected, counted, variance,
       start: state.shiftStart, end: new Date().toISOString(),
       count: s.count, items: s.items, total: s.total,
       cash: s.cash, qris: s.qris, card: s.card, online: s.online,
     });
     state.shifts = state.shifts.slice(0, 200);
   }
-  logActivity('shift_close', 'shift', state.session ? state.session.userId : '', {
+  logActivity('shift_close', 'shift', state.shiftId, {
     total: s ? s.total : 0, cash: s ? s.cash : 0, count: s ? s.count : 0,
+    expected: s ? s.expected : 0, counted, variance,
   });
+  syncShifts();
   state.cashier = '';
   state.shiftStart = '';
+  state.shiftId = '';
+  state.openingCash = 0;
   saveData();
   renderCashier();
   renderShiftLog();
@@ -2395,7 +2509,7 @@ function renderShiftLog() {
   if (!wrap) return;
   const rows = (state.shifts || []).slice(0, 20);
   wrap.innerHTML = rows.length
-    ? '<table><thead><tr><th>Kasir</th><th>Cabang</th><th>Masuk</th><th>Keluar</th><th>Trx</th><th>Tunai</th><th>Total</th></tr></thead><tbody>' +
+    ? '<table><thead><tr><th>Kasir</th><th>Cabang</th><th>Masuk</th><th>Keluar</th><th>Trx</th><th>Tunai</th><th>Laci</th><th>Selisih</th><th>Total</th></tr></thead><tbody>' +
       rows.map(r => {
         const t = d => new Date(d).toLocaleString('id-ID', {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
         return `<tr>
@@ -2403,6 +2517,9 @@ function renderShiftLog() {
           <td style="color:#888;">${esc(r.branch || '-')}</td>
           <td>${t(r.start)}</td><td>${t(r.end)}</td>
           <td>${r.count}</td><td>${fmt(r.cash)}</td>
+          <td>${r.counted != null ? fmt(r.counted) : '<span style="color:#bbb;">-</span>'}</td>
+          <td style="${r.variance ? (r.variance < 0 ? 'color:#c0392b;' : 'color:#e65100;') + 'font-weight:600;' : 'color:#888;'}">${
+            r.variance == null ? '-' : (r.variance === 0 ? 'cocok' : (r.variance > 0 ? '+' : '') + fmt(r.variance))}</td>
           <td style="font-weight:600;">${fmt(r.total)}</td>
         </tr>`;
       }).join('') + '</tbody></table>'
@@ -2974,6 +3091,7 @@ function confirmPayment() {
   clearCart();
   clearCustPanel();
   renderFavourites();
+  renderCashier();       // angka uang laci ikut naik setelah penjualan tunai
   syncNow();
 }
 

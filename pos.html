@@ -1070,7 +1070,7 @@ create index if not exists pos_products_branch_idx on pos_products (branch);</te
 <script>
 // ── DATA ──────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'elva_pos_v1';
-const APP_VERSION = 'v17 · 2026-08-17';   // shown in Profile so the live build is identifiable
+const APP_VERSION = 'v18 · 2026-08-17';   // shown in Profile so the live build is identifiable
 
 const defaultProducts = [
   { id: 1,  name: 'Kopi Susu Gula Aren', emoji: '🧋', cat: 'Minuman', price: 22000, stock: 50 },
@@ -1134,6 +1134,7 @@ if (!state.settings.supabaseUrl) state.settings.supabaseUrl = '';
 if (!state.settings.supabaseKey) state.settings.supabaseKey = '';
 if (!state.unsynced) state.unsynced = [];   // trx uids waiting to reach the cloud
 if (!state.unsyncedProducts) state.unsyncedProducts = [];   // product ids waiting to reach the cloud
+if (state.lastSyncError === undefined) state.lastSyncError = null;  // kenapa antrean mandek
 if (!state.settings.storeName) state.settings.storeName = 'MUGI POS';
 if (!state.settings.logo) state.settings.logo = '';
 if (!state.settings.cashiers) state.settings.cashiers = [];   // remembered names
@@ -1739,21 +1740,37 @@ function sellableItems() {
 function itemByKey(key) { return sellableItems().find(x => x.key === key); }
 function spByKey(key)   { return state.storeProducts.find(sp => sp.pkey === key); }
 
+// Mengembalikan true kalau semua baris sampai di cloud. Antrean produk
+// (state.unsyncedProducts) dikosongkan HANYA saat itu — kalau tidak, badge
+// "N antre" tidak pernah surut walaupun datanya sebenarnya sudah terkirim.
 async function syncStoreProducts() {
-  if (!cloudEnabled()) return;
+  if (!cloudEnabled()) return false;
   const rows = storeRows().map(sp => ({
     pkey: sp.pkey, store_id: sp.storeId, product_id: sp.productId, variant_id: sp.variantId,
     sold: sp.sold !== false, price: sp.price || 0, stock: sp.stock || 0, fav: !!sp.fav,
     updated_at: new Date().toISOString(),
   }));
-  if (!rows.length) return;
+  if (!rows.length) {
+    state.unsyncedProducts = [];
+    saveData(); updateCloudBadge();
+    return true;
+  }
   try {
-    await sbFetch('/rest/v1/store_products?on_conflict=pkey', {
+    const res = await sbFetch('/rest/v1/store_products?on_conflict=pkey', {
       method: 'POST',
       headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
       body: JSON.stringify(rows),
     });
-  } catch (e) {}
+    if (!res.ok) { await noteSyncError('store_products', res); updateCloudBadge(); return false; }
+    clearSyncError();
+    state.unsyncedProducts = [];
+    saveData(); updateCloudBadge();
+    return true;
+  } catch (e) {
+    noteSyncOffline('store_products', e);
+    updateCloudBadge();
+    return false;
+  }
 }
 
 // ── MASTER: KATEGORI, PRODUK, VARIAN ──────────────────────────────────────
@@ -3257,6 +3274,10 @@ function editStoreProduct(key, field, val) {
   if (field === 'sold')  logActivity('product_edit', 'store_product', key, { sold: val });
   renderProductTable();
   refreshPos();
+  // Ditandai dulu, baru dikirim: kalau pengirimannya gagal antreannya tidak
+  // ikut dikosongkan, jadi badge tetap menunjukkan ada yang belum naik.
+  markProductDirty(sp.productId);
+  updateCloudBadge();
   syncStoreProducts();
 }
 
@@ -3269,6 +3290,8 @@ function toggleFav(key) {
   saveData();
   renderProductTable();
   renderFavourites();
+  markProductDirty(sp.productId);
+  updateCloudBadge();
   syncStoreProducts();
 }
 
@@ -3521,6 +3544,7 @@ function resetAll() {
     nextTrxNum: 1,
     unsynced: [],
     unsyncedProducts: [],
+    lastSyncError: null,
     shifts: state.shifts || [],
     customers: state.customers || {},
     vouchers: state.vouchers || [],
@@ -3594,6 +3618,45 @@ function renderReportCharts(weekTrx, inBranch) {
 // ── CLOUD SYNC (SUPABASE) ─────────────────────────────────────────────────
 function cloudEnabled() { return !!(state.settings.supabaseUrl && state.settings.supabaseKey); }
 
+// Kegagalan sinkron dulu dibuang ke `catch (e) {}` kosong, jadi antrean bisa
+// mandek berhari-hari tanpa satu pun petunjuk kenapa. Sekarang alasannya
+// disimpan dan ditampilkan di modal Cloud + tooltip badge.
+async function noteSyncError(table, res) {
+  let detail = '';
+  try {
+    const body = await res.clone().text();
+    const j = body && body.trim().startsWith('{') ? JSON.parse(body) : null;
+    detail = (j && (j.message || j.hint)) || body.slice(0, 200);
+  } catch (e) { /* body tidak terbaca — kode HTTP saja sudah cukup */ }
+  state.lastSyncError = {
+    at: new Date().toISOString(), table,
+    message: 'HTTP ' + res.status + (detail ? ' — ' + detail : ''),
+  };
+  saveData();
+}
+
+function noteSyncOffline(table, e) {
+  state.lastSyncError = {
+    at: new Date().toISOString(), table,
+    message: 'Tidak tersambung ke server' + (e && e.message ? ' (' + e.message + ')' : ''),
+  };
+  saveData();
+}
+
+function clearSyncError() {
+  if (!state.lastSyncError) return;
+  state.lastSyncError = null;
+  saveData();
+}
+
+function syncErrorText() {
+  const e = state.lastSyncError;
+  if (!e) return '';
+  const t = new Date(e.at);
+  const jam = isNaN(t) ? '' : t.toLocaleString('id-ID');
+  return 'Sinkron ' + e.table + ' gagal' + (jam ? ' (' + jam + ')' : '') + ': ' + e.message;
+}
+
 function sbFetch(path, opts = {}) {
   const url = state.settings.supabaseUrl.replace(/\/+$/, '') + path;
   return fetch(url, {
@@ -3638,9 +3701,15 @@ async function syncNow() {
     if (res.ok) {
       const sent = rows.map(r => r.uid);
       state.unsynced = state.unsynced.filter(u => !sent.includes(u));
+      clearSyncError();
       saveData();
+    } else {
+      await noteSyncError('pos_transactions', res);
     }
-  } catch (e) { /* offline — stays queued, retried on next sale or reload */ }
+  } catch (e) {
+    // offline — tetap mengantre, dicoba lagi saat penjualan berikutnya / reload
+    noteSyncOffline('pos_transactions', e);
+  }
   updateCloudBadge();
 }
 
@@ -3829,18 +3898,30 @@ async function cloudPushProducts() {
   if (!confirm('Kirim master produk dan pengaturan toko ini ke cloud?\n\nData di cloud akan ditimpa dengan yang ada di perangkat ini.')) return;
   status.textContent = 'Mengirim produk…';
   await syncMaster();
-  await syncStoreProducts();
-  state.unsyncedProducts = [];
-  status.innerHTML = state.unsyncedProducts.length === 0
+  // Hasilnya dibaca dari nilai kembalian — bukan dari array yang baru saja
+  // dikosongkan, yang dulu membuat pesan ini selalu berbunyi "berhasil".
+  const ok = await syncStoreProducts();
+  saveData();
+  updateCloudBadge();
+  status.innerHTML = ok
     ? '<span style="color:#27ae60;">✓ ' + state.products.length + ' produk terkirim ke cloud.</span>'
-    : '<span style="color:#c0392b;">Sebagian gagal terkirim (' + state.unsyncedProducts.length + ' antre). Cek koneksi, lalu coba lagi.</span>';
+    : '<span style="color:#c0392b;">Gagal terkirim (' + state.unsyncedProducts.length + ' antre).<br>' +
+      esc(syncErrorText() || 'Cek koneksi, lalu coba lagi.') + '</span>';
 }
 
 function openCloud() {
   document.getElementById('cloudBranchLabel').textContent = branchKey();
   document.getElementById('sbUrl').value = state.settings.supabaseUrl;
   document.getElementById('sbKey').value = state.settings.supabaseKey;
-  document.getElementById('cloudStatus').textContent = '';
+  // Kalau ada yang mandek, alasannya langsung terbaca di sini — tidak perlu
+  // menebak kenapa badge menunjukkan "N antre".
+  const err = syncErrorText();
+  const antre = state.unsynced.length + state.unsyncedProducts.length;
+  document.getElementById('cloudStatus').innerHTML = err
+    ? '<span style="color:#c0392b;">⚠️ ' + esc(err) + '</span>'
+    : (cloudEnabled() && antre > 0
+        ? '<span style="color:#555;">' + antre + ' data menunggu dikirim.</span>'
+        : '');
   document.getElementById('cloudModal').classList.add('show');
 }
 function closeCloud() { document.getElementById('cloudModal').classList.remove('show'); }
@@ -3861,9 +3942,14 @@ async function saveCloudSettings() {
 
       // products would OVERWRITE the cloud menu, so only upload them when the
       // cloud is still empty. Otherwise the user chooses: pull down, or push over.
+      //
+      // Dicek ke store_products — tabel yang benar-benar dipakai sejak katalog
+      // dipisah per toko. pos_products sudah jadi arsip dan di project lama
+      // bahkan tidak punya kolom branch, sehingga probe-nya menghasilkan 400
+      // dan cloud yang sudah berisi data salah dibaca sebagai "masih kosong".
       let cloudCount = 0;
       try {
-        const pr = await sbFetch('/rest/v1/pos_products?select=id&branch=eq.' + encodeURIComponent(branchKey()));
+        const pr = await sbFetch('/rest/v1/store_products?select=pkey&store_id=eq.' + encodeURIComponent(sessionStoreId() || branchKey()));
         if (pr.ok) cloudCount = (await pr.json()).length;
       } catch (e) {}
 
@@ -3896,9 +3982,15 @@ async function saveCloudSettings() {
 
 function updateCloudBadge() {
   const b = document.getElementById('cloudBadge');
+  const antre = state.unsynced.length + state.unsyncedProducts.length;
   if (!cloudEnabled()) { b.className = 'cloud-badge'; b.textContent = '☁️ off'; }
-  else if (state.unsynced.length + state.unsyncedProducts.length > 0) { b.className = 'cloud-badge pending'; b.textContent = '☁️ ' + (state.unsynced.length + state.unsyncedProducts.length) + ' antre'; }
+  else if (antre > 0) { b.className = 'cloud-badge pending'; b.textContent = '☁️ ' + antre + ' antre'; }
   else { b.className = 'cloud-badge on'; b.textContent = '☁️ sinkron'; }
+  // Alasan antrean mandek bisa dibaca dengan menahan/menyorot badge, dan
+  // tampil penuh di modal Cloud.
+  b.title = cloudEnabled()
+    ? (syncErrorText() || (antre > 0 ? antre + ' data menunggu dikirim.' : 'Semua data sudah tersimpan di cloud.'))
+    : 'Sinkronisasi cloud belum diaktifkan.';
 }
 
 // ── SKEMA MULTI-TOKO ──────────────────────────────────────────────────────

@@ -67,6 +67,16 @@
   .section-title { font-size: 15px; font-weight: 600; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
   .section-title .badge { font-size: 11px; font-weight: 500; background: #f5f5f3; border: 1px solid #e5e5e0; border-radius: 20px; padding: 2px 10px; color: #555; }
 
+  /* Daftar panjang (riwayat shift, member, log aktivitas) dilipat supaya tab
+     Profil tidak terbentang berlayar-layar. Pakai <details> bawaan: tidak perlu
+     JavaScript, dan tetap bisa dibuka/tutup walau skrip gagal dimuat. */
+  summary.section-title { cursor: pointer; margin-bottom: 0; list-style: none; user-select: none; }
+  summary.section-title::-webkit-details-marker { display: none; }
+  summary.section-title::before { content: '▸'; color: #999; font-size: 12px; transition: transform .15s; }
+  details[open] > summary.section-title { margin-bottom: 14px; }
+  details[open] > summary.section-title::before { content: '▾'; }
+  .collapse-body { overflow: auto; max-height: 360px; }
+
   /* ── KASIR ── */
   .pos-layout { display: grid; grid-template-columns: 1fr 360px; gap: 16px; align-items: start; }
 
@@ -606,10 +616,13 @@
         <div style="font-size:12px;color:#888;margin-bottom:6px;">Daftar kasir tersimpan</div>
         <div id="cashierList" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
       </div>
-      <div style="margin-top:16px;">
-        <div style="font-size:12px;color:#888;margin-bottom:6px;">Riwayat shift (check-in / check-out)</div>
-        <div id="shiftLog" style="overflow-x:auto;"></div>
-      </div>
+      <details style="margin-top:16px;">
+        <summary class="section-title" style="font-size:12px;font-weight:500;color:#888;">
+          Riwayat shift (check-in / check-out)
+          <span class="badge" id="shiftLogCount">0</span>
+        </summary>
+        <div id="shiftLog" class="collapse-body"></div>
+      </details>
       <p style="font-size:12px;color:#888;line-height:1.6;margin-top:12px;">
         Setiap transaksi dicatat atas nama kasir yang sedang bertugas, dan bisa dilihat di Riwayat, struk, laporan, serta file CSV.
       </p>
@@ -672,11 +685,13 @@
     </div>
 
     <div class="section mgr-only">
-      <div class="section-title">
-        Pelanggan / Member
-        <span class="badge" id="customerCount">0 pelanggan</span>
-      </div>
-      <div id="customerList" style="overflow-x:auto;"></div>
+      <details>
+        <summary class="section-title">
+          Pelanggan / Member
+          <span class="badge" id="customerCount">0 pelanggan</span>
+        </summary>
+        <div id="customerList" class="collapse-body"></div>
+      </details>
       <p style="font-size:12px;color:#888;line-height:1.6;margin-top:10px;">
         Nomor HP yang diisi saat pembayaran otomatis tersimpan di sini beserta jumlah kunjungan dan total belanja.
       </p>
@@ -722,11 +737,13 @@
     </div>
 
     <div class="section mgr-only">
-      <div class="section-title">
-        Log Aktivitas
-        <span class="badge">50 terakhir</span>
-      </div>
-      <div id="activityLog" style="overflow-x:auto;"></div>
+      <details>
+        <summary class="section-title">
+          Log Aktivitas
+          <span class="badge" id="activityCount">50 terakhir</span>
+        </summary>
+        <div id="activityLog" class="collapse-body"></div>
+      </details>
     </div>
 
     <div class="section">
@@ -1070,7 +1087,7 @@ create index if not exists pos_products_branch_idx on pos_products (branch);</te
 <script>
 // ── DATA ──────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'elva_pos_v1';
-const APP_VERSION = 'v18 · 2026-08-17';   // shown in Profile so the live build is identifiable
+const APP_VERSION = 'v19 · 2026-08-17';   // shown in Profile so the live build is identifiable
 
 const defaultProducts = [
   { id: 1,  name: 'Kopi Susu Gula Aren', emoji: '🧋', cat: 'Minuman', price: 22000, stock: 50 },
@@ -1135,6 +1152,7 @@ if (!state.settings.supabaseKey) state.settings.supabaseKey = '';
 if (!state.unsynced) state.unsynced = [];   // trx uids waiting to reach the cloud
 if (!state.unsyncedProducts) state.unsyncedProducts = [];   // product ids waiting to reach the cloud
 if (state.lastSyncError === undefined) state.lastSyncError = null;  // kenapa antrean mandek
+if (!state.unsyncedUsers) state.unsyncedUsers = [];        // akun yang belum sampai ke cloud
 if (!state.settings.storeName) state.settings.storeName = 'MUGI POS';
 if (!state.settings.logo) state.settings.logo = '';
 if (!state.settings.cashiers) state.settings.cashiers = [];   // remembered names
@@ -1252,13 +1270,35 @@ async function ensureBootstrapUser() {
   saveData();
 }
 
+function markUserDirty(id) {
+  if (!state.unsyncedUsers.includes(id)) state.unsyncedUsers.push(id);
+}
+
 async function refreshUsersFromCloud() {
   if (!cloudEnabled()) return false;
   try {
     const res = await sbFetch('/rest/v1/users?select=*');
     if (!res.ok) return false;
     const rows = await res.json();
-    if (Array.isArray(rows) && rows.length) { state.users = rows; saveData(); return true; }
+    if (!Array.isArray(rows) || !rows.length) return false;
+
+    // Digabung, BUKAN ditimpa. Daftar ini ditarik tepat sebelum login memeriksa
+    // username, jadi menimpanya akan menghapus akun yang baru dibuat di
+    // perangkat ini dan belum sempat naik ke cloud — akunnya lenyap justru saat
+    // hendak dipakai. Yang dipertahankan hanya akun yang memang masih mengantre;
+    // akun yang sudah pernah tersinkron lalu hilang dari cloud berarti sengaja
+    // dihapus dari perangkat lain, jadi ikut hilang di sini.
+    const idCloud   = new Set(rows.map(r => String(r.id)));
+    const namaCloud = new Set(rows.map(r => String(r.username).toLowerCase()));
+    const belumNaik = state.users.filter(u =>
+      state.unsyncedUsers.includes(u.id) &&
+      !idCloud.has(String(u.id)) &&
+      !namaCloud.has(String(u.username).toLowerCase()));
+
+    state.users = rows.concat(belumNaik);
+    saveData();
+    if (belumNaik.length) syncUsers();      // coba naikkan lagi diam-diam
+    return true;
   } catch (e) {}
   return false;
 }
@@ -1375,15 +1415,33 @@ async function addUser() {
   if (!/^\d{4,6}$/.test(pin)) { alert('PIN harus 4-6 angka.'); return; }
 
   const salt = makeSalt();
+  const id = 'u-' + Date.now().toString(36);
   state.users.push({
-    id: 'u-' + Date.now().toString(36), username, name, role,
+    id, username, name, role,
     store_id: storeId || null, active: true,
     pin_salt: salt, pin_hash: await hashPin(salt, pin),
   });
+  markUserDirty(id);
   saveData();
   logActivity('user_add', 'user', username, { role });
   renderUsers();
-  syncUsers();
+
+  // Hasilnya ditunggu: akun yang gagal naik tidak akan bisa dipakai login di
+  // perangkat lain, dan itu harus dikatakan sekarang — bukan baru ketahuan
+  // saat kasirnya gagal masuk.
+  const ok = await syncUsers();
+  renderUsers();
+  if (ok) {
+    alert('Akun "' + username + '" dibuat dan sudah tersimpan di cloud.\n\nPIN awal: ' + pin);
+  } else if (cloudEnabled()) {
+    alert('Akun "' + username + '" tersimpan di PERANGKAT INI saja — belum sampai ke cloud, '
+      + 'jadi belum bisa dipakai login di HP lain.\n\n'
+      + (syncErrorText() || 'Cek koneksi internet.')
+      + '\n\nAkun tetap disimpan dan akan dikirim otomatis saat sambungan pulih.');
+  } else {
+    alert('Akun "' + username + '" dibuat di perangkat ini.\n\nPIN awal: ' + pin
+      + '\n\nSinkronisasi cloud belum aktif, jadi akun ini belum ada di HP lain.');
+  }
 }
 
 function editUser(i, field, val) {
@@ -1398,6 +1456,7 @@ function editUser(i, field, val) {
   }
   if (field === 'store_id') val = String(val).trim() || null;
   u[field] = val;
+  markUserDirty(u.id);
   saveData();
   logActivity('user_edit', 'user', u.username, { field });
   renderUsers();
@@ -1413,10 +1472,12 @@ async function resetUserPin() {
   if (!/^\d{4,6}$/.test(pin)) { alert('PIN harus 4-6 angka.'); return; }
   u.pin_salt = makeSalt();
   u.pin_hash = await hashPin(u.pin_salt, pin);
+  markUserDirty(u.id);
   saveData();
   logActivity('user_pin_reset', 'user', u.username, {});
-  syncUsers();
-  alert('PIN ' + u.username + ' sudah diganti.');
+  const ok = await syncUsers();
+  alert('PIN ' + u.username + ' sudah diganti.'
+    + (ok || !cloudEnabled() ? '' : '\n\nCatatan: belum tersimpan ke cloud, jadi di HP lain PIN lamanya masih berlaku.'));
 }
 
 async function changeOwnPin() {
@@ -1450,15 +1511,42 @@ function removeUser(i) {
   if (cloudEnabled()) sbFetch('/rest/v1/users?id=eq.' + encodeURIComponent(u.id), { method: 'DELETE' }).catch(() => {});
 }
 
+// Kunci tetap, seperti trxToRow(). Dulu isi state.users dikirim apa adanya,
+// padahal baris hasil tarikan cloud membawa kolom milik server (auth_uid,
+// created_at, last_login) sedangkan akun buatan aplikasi tidak. PostgREST
+// menolak bulk insert yang kuncinya tidak seragam (PGRST102), jadi satu akun
+// baru cukup untuk menggugurkan seluruh kiriman.
+function userToRow(u) {
+  return {
+    id: u.id,
+    username: u.username,
+    pin_hash: u.pin_hash || '',
+    pin_salt: u.pin_salt || '',
+    name: u.name || '',
+    role: u.role || 'kasir',
+    store_id: u.store_id || null,
+    active: u.active !== false,
+  };
+}
+
 async function syncUsers() {
-  if (!cloudEnabled() || !state.users.length) return;
+  if (!cloudEnabled() || !state.users.length) return false;
   try {
-    await sbFetch('/rest/v1/users?on_conflict=id', {
+    const res = await sbFetch('/rest/v1/users?on_conflict=id', {
       method: 'POST',
       headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-      body: JSON.stringify(state.users.map(({ _sent, ...u }) => u)),
+      body: JSON.stringify(state.users.map(userToRow)),
     });
-  } catch (e) {}
+    if (!res.ok) { await noteSyncError('users', res); updateCloudBadge(); return false; }
+    clearSyncError();
+    state.unsyncedUsers = [];
+    saveData(); updateCloudBadge();
+    return true;
+  } catch (e) {
+    noteSyncOffline('users', e);
+    updateCloudBadge();
+    return false;
+  }
 }
 
 // ── KAS LACI ──────────────────────────────────────────────────────────────
@@ -1562,6 +1650,9 @@ function renderActivityLog() {
     ? state.activityLog
     : state.activityLog.filter(r => (r.store_id || '') === sessionStoreId());
   const rows = mine.slice(0, 50);
+  const cnt = document.getElementById('activityCount');
+  if (cnt) cnt.textContent = mine.length > rows.length
+    ? rows.length + ' dari ' + mine.length : mine.length + ' catatan';
   wrap.innerHTML = rows.length
     ? '<table><thead><tr><th>Waktu</th><th>User</th><th>Aksi</th><th>Objek</th></tr></thead><tbody>' +
       rows.map(r => `<tr>
@@ -2547,7 +2638,11 @@ if (!state.deviceId) state.deviceId = 'dev-' + Math.random().toString(36).slice(
 function renderShiftLog() {
   const wrap = document.getElementById('shiftLog');
   if (!wrap) return;
-  const rows = (state.shifts || []).slice(0, 20);
+  const all = state.shifts || [];
+  const rows = all.slice(0, 20);
+  const cnt = document.getElementById('shiftLogCount');
+  if (cnt) cnt.textContent = all.length > rows.length
+    ? rows.length + ' dari ' + all.length : all.length + ' shift';
   wrap.innerHTML = rows.length
     ? '<table><thead><tr><th>Kasir</th><th>Cabang</th><th>Masuk</th><th>Keluar</th><th>Trx</th><th>Tunai</th><th>Laci</th><th>Selisih</th><th>Total</th></tr></thead><tbody>' +
       rows.map(r => {
@@ -3544,6 +3639,7 @@ function resetAll() {
     nextTrxNum: 1,
     unsynced: [],
     unsyncedProducts: [],
+    unsyncedUsers: [],
     lastSyncError: null,
     shifts: state.shifts || [],
     customers: state.customers || {},
@@ -3916,7 +4012,7 @@ function openCloud() {
   // Kalau ada yang mandek, alasannya langsung terbaca di sini — tidak perlu
   // menebak kenapa badge menunjukkan "N antre".
   const err = syncErrorText();
-  const antre = state.unsynced.length + state.unsyncedProducts.length;
+  const antre = state.unsynced.length + state.unsyncedProducts.length + state.unsyncedUsers.length;
   document.getElementById('cloudStatus').innerHTML = err
     ? '<span style="color:#c0392b;">⚠️ ' + esc(err) + '</span>'
     : (cloudEnabled() && antre > 0
@@ -3982,7 +4078,7 @@ async function saveCloudSettings() {
 
 function updateCloudBadge() {
   const b = document.getElementById('cloudBadge');
-  const antre = state.unsynced.length + state.unsyncedProducts.length;
+  const antre = state.unsynced.length + state.unsyncedProducts.length + state.unsyncedUsers.length;
   if (!cloudEnabled()) { b.className = 'cloud-badge'; b.textContent = '☁️ off'; }
   else if (antre > 0) { b.className = 'cloud-badge pending'; b.textContent = '☁️ ' + antre + ' antre'; }
   else { b.className = 'cloud-badge on'; b.textContent = '☁️ sinkron'; }

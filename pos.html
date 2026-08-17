@@ -953,10 +953,17 @@
       <summary style="font-size:13px;font-weight:600;cursor:pointer;color:#555;">Cara setup Supabase (sekali saja)</summary>
       <ol style="font-size:12px;color:#555;line-height:1.8;margin:10px 0 10px 18px;">
         <li>Buat akun gratis di <b>supabase.com</b> → New Project</li>
-        <li>Di project: buka <b>SQL Editor</b> → paste SQL di bawah → Run</li>
+        <li>Di project: buka <b>SQL Editor</b> → <b>New query</b> → paste SQL di bawah <b>seluruhnya</b> → Run.
+            Jangan dijalankan sepotong-sepotong: SQL Editor membungkus satu skrip dalam satu transaksi,
+            jadi menjalankan sebagian akan gagal dan membatalkan semuanya.</li>
         <li>Buka <b>Settings → API</b>: salin <b>Project URL</b> dan <b>anon public key</b> ke kolom di atas → Simpan &amp; Tes</li>
         <li>Untuk lihat/export laporan: buka <b>Table Editor → pos_transactions</b> di dashboard Supabase (bisa export CSV dari sana)</li>
       </ol>
+      <p style="font-size:12px;color:#555;line-height:1.7;margin:0 0 10px;">
+        SQL di bawah hanya menyiapkan <b>tabel transaksi &amp; produk</b> — cukup untuk sinkron penjualan.
+        Untuk fitur multi-toko penuh (akun user, master produk, varian, member), jalankan
+        <b>supabase-schema.sql</b> yang ada di folder aplikasi; file itu sudah mencakup semua yang di bawah ini.
+      </p>
       <textarea class="sql" readonly onclick="this.select()">create table if not exists pos_transactions (
   uid text primary key,
   trx_id text,
@@ -1008,24 +1015,39 @@ create policy "pos_prod_update" on pos_products
 create policy "pos_prod_delete" on pos_products
   for delete to anon using (true);
 
--- kalau tabel transaksi sudah dibuat sebelum ada fitur kasir, jalankan ini juga:
-alter table pos_transactions add column if not exists cashier text;
-alter table pos_transactions add column if not exists branch text;
-alter table pos_transactions add column if not exists cust_name text;
-alter table pos_transactions add column if not exists cust_phone text;
-alter table pos_transactions add column if not exists voucher text;
-alter table pos_products add column if not exists fav boolean;
+-- ── WAJIB kalau tabel di atas dibuat oleh versi aplikasi yang lebih lama ──
+-- Aplikasi mengirim SEMUA kolom di bawah setiap kali menyimpan transaksi.
+-- Kalau satu saja tidak ada, Supabase menolak seluruh batch dan penjualan
+-- menumpuk di antrean perangkat tanpa pesan error apa pun.
+alter table pos_transactions add column if not exists cashier     text;
+alter table pos_transactions add column if not exists branch      text;
+alter table pos_transactions add column if not exists cust_name   text;
+alter table pos_transactions add column if not exists cust_phone  text;
+alter table pos_transactions add column if not exists voucher     text;
+alter table pos_transactions add column if not exists status      text default 'completed';
+alter table pos_transactions add column if not exists voided_at   timestamptz;
+alter table pos_transactions add column if not exists voided_by   text;
+alter table pos_transactions add column if not exists void_reason text;
+alter table pos_transactions add column if not exists user_id     text;
+alter table pos_transactions add column if not exists shift_id    text;
+alter table pos_transactions add column if not exists device_id   text;
+alter table pos_transactions add column if not exists app_version text;
+alter table pos_transactions add column if not exists payments    jsonb;
+alter table pos_transactions add column if not exists commission  numeric;
+alter table pos_transactions add column if not exists net         numeric;
+update pos_transactions set status = 'completed' where status is null;
+create index if not exists pos_transactions_branch_idx on pos_transactions (branch);
 
 -- MULTI-CABANG: tiap toko punya baris produk & stok sendiri.
 -- Jalankan blok ini kalau tabel pos_products dibuat sebelum fitur cabang.
+alter table pos_products add column if not exists fav boolean;
 alter table pos_products add column if not exists branch text;
 alter table pos_products add column if not exists pkey text;
 update pos_products set branch = '(default)' where branch is null;
 update pos_products set pkey = branch || ':' || id where pkey is null;
 alter table pos_products drop constraint if exists pos_products_pkey;
 alter table pos_products add primary key (pkey);
-create index if not exists pos_products_branch_idx on pos_products (branch);
-create index if not exists pos_transactions_branch_idx on pos_transactions (branch);</textarea>
+create index if not exists pos_products_branch_idx on pos_products (branch);</textarea>
       <p style="font-size:11px;color:#999;line-height:1.6;margin-top:8px;">
         ⚠️ Anon key ini memberi akses baca/tulis tabel transaksi — jangan bagikan link aplikasi + key ke orang luar.
       </p>
@@ -1048,7 +1070,7 @@ create index if not exists pos_transactions_branch_idx on pos_transactions (bran
 <script>
 // ── DATA ──────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'elva_pos_v1';
-const APP_VERSION = 'v16 · 2026-08-16';   // shown in Profile so the live build is identifiable
+const APP_VERSION = 'v17 · 2026-08-17';   // shown in Profile so the live build is identifiable
 
 const defaultProducts = [
   { id: 1,  name: 'Kopi Susu Gula Aren', emoji: '🧋', cat: 'Minuman', price: 22000, stock: 50 },
@@ -3781,6 +3803,13 @@ async function cloudPull() {
         ref: r.ref, cashier: r.cashier || '', branch: r.branch || '', custName: r.cust_name || '', custPhone: r.cust_phone || '', voucher: r.voucher || '', subtotal: +r.subtotal, discount: +r.discount, tax: +r.tax,
         total: +r.total, commission: +r.commission, net: +r.net,
         items: typeof r.items === 'string' ? JSON.parse(r.items) : (r.items || []),
+        // Tanpa status, transaksi yang sudah di-void di toko lain akan kembali
+        // terhitung sebagai penjualan sah begitu ditarik ke perangkat ini.
+        status: r.status || 'completed', voidedAt: r.voided_at || null,
+        voidedBy: r.voided_by || '', voidReason: r.void_reason || '',
+        userId: r.user_id || '', shiftId: r.shift_id || '',
+        deviceId: r.device_id || '', appVersion: r.app_version || '',
+        payments: typeof r.payments === 'string' ? JSON.parse(r.payments) : (r.payments || null),
         cash: +r.total, change: 0,
       });
       added++;
